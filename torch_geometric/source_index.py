@@ -468,7 +468,7 @@ class SourceIndex(Tensor):
 
     def _shallow_copy(self) -> 'SourceIndex':
         out = SourceIndex(self._data)
-        out._sparse_size = self._sparse_size
+        out._sparse_size = self._sparse_size()
         out._sort_order = self._sort_order
         out._cat_metadata = self._cat_metadata
         return out
