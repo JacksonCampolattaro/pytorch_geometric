@@ -8,7 +8,7 @@ from torch import Tensor
 from torch.nn import Linear
 
 import torch_geometric.typing
-from torch_geometric import EdgeIndex
+from torch_geometric import EdgeIndex, SourceIndex
 from torch_geometric.nn import GATConv, MessagePassing, aggr
 from torch_geometric.typing import (
     Adj,
@@ -37,11 +37,11 @@ class MyConv(MessagePassing):
         self.lin_r = Linear(in_channels[1], out_channels)
 
     def forward(
-        self,
-        x: Union[Tensor, OptPairTensor],
-        edge_index: Adj,
-        edge_weight: OptTensor = None,
-        size: Size = None,
+            self,
+            x: Union[Tensor, OptPairTensor],
+            edge_index: Adj,
+            edge_weight: OptTensor = None,
+            size: Size = None,
     ) -> Tensor:
 
         if isinstance(x, Tensor):
@@ -157,8 +157,21 @@ def test_my_conv_edge_index():
     assert out.size() == (4, 32)
 
 
+def test_my_conv_source_index():
+    x = torch.randn(4, 8)
+    # source_index = torch.tensor([[0, 0, 1, 1], [1, 1, 2, 2], [2, 2, 3, 3], [3, 3, 3, 3]])
+    source_index = torch.tensor([[0], [0], [1], [1]])
+    source_index = SourceIndex(source_index, sparse_size=(4, 4), sort_order='id')
+
+    conv = MyConv(8, 32)
+
+    out = conv(x, source_index)
+    assert out.size() == (4, 32)
+
+
 class MyCommentedConv(MessagePassing):
     r"""This layer calls `self.propagate()` internally."""
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -694,7 +707,7 @@ def test_message_passing_int32_edge_index():
     def cast_index_hook(module, inputs):
         input_dict = inputs[-1]
         input_dict['index'] = input_dict['index'].long()
-        return (input_dict, )
+        return (input_dict,)
 
     conv = MyConv(8, 32)
     conv.register_aggregate_forward_pre_hook(cast_index_hook)
