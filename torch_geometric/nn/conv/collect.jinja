@@ -162,7 +162,7 @@ def {{collect_name}}(
 {%- endif %}
 {%- endfor %}
 
-    index = edge_index if isinstance(edge_index, SourceIndex) else out['edge_index_i']
+    index = edge_index if isinstance(edge_index, SourceIndex) else edge_index_i
     size_i = size[i] if size[i] is not None else size[j]
     size_j = size[j] if size[j] is not None else size[i]
     dim_size = size_i

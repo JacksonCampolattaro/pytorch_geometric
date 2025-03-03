@@ -149,6 +149,7 @@ def test_my_conv_save(tmp_path):
 def test_my_conv_edge_index():
     x = torch.randn(4, 8)
     edge_index = torch.tensor([[0, 1, 2, 3], [0, 0, 1, 1]])
+    print(edge_index)
     edge_index = EdgeIndex(edge_index, sparse_size=(4, 4), sort_order='col')
 
     conv = MyConv(8, 32)
