@@ -60,6 +60,17 @@ def {{collect_name}}(
                 edge_type = adj_t.values()
 {%- endif %}
 
+        elif isinstance(edge_index, SourceIndex):
+{%- if 'edge_index' in collect_param_dict %}
+            raise ValueError("Cannot collect 'edge_indices' for sparse matrices")
+{%- endif %}
+{%- if 'adj_t' in collect_param_dict %}
+            raise ValueError("Cannot collect 'adj_t' for edge indices")
+{%- endif %}
+            edge_index_j = edge_index.flatten()
+            edge_index_i = None
+            ptr = None
+
         else:
 {%- if 'adj_t' in collect_param_dict %}
             raise ValueError("Cannot collect 'adj_t' for edge indices")
@@ -151,7 +162,7 @@ def {{collect_name}}(
 {%- endif %}
 {%- endfor %}
 
-    index = edge_index_i
+    index = edge_index if isinstance(edge_index, SourceIndex) else out['edge_index_i']
     size_i = size[i] if size[i] is not None else size[j]
     size_j = size[j] if size[j] is not None else size[i]
     dim_size = size_i

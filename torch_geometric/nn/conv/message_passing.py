@@ -19,7 +19,7 @@ import torch
 from torch import Tensor
 from torch.utils.hooks import RemovableHandle
 
-from torch_geometric import EdgeIndex, is_compiling
+from torch_geometric import EdgeIndex, is_compiling, SourceIndex
 from torch_geometric.index import ptr2index
 from torch_geometric.inspector import Inspector, Signature
 from torch_geometric.nn.aggr import Aggregation
@@ -108,13 +108,13 @@ class MessagePassing(torch.nn.Module):
     SUPPORTS_FUSED_EDGE_INDEX: Final[bool] = False
 
     def __init__(
-        self,
-        aggr: Optional[Union[str, List[str], Aggregation]] = 'sum',
-        *,
-        aggr_kwargs: Optional[Dict[str, Any]] = None,
-        flow: str = "source_to_target",
-        node_dim: int = -2,
-        decomposed_layers: int = 1,
+            self,
+            aggr: Optional[Union[str, List[str], Aggregation]] = 'sum',
+            *,
+            aggr_kwargs: Optional[Dict[str, Any]] = None,
+            flow: str = "source_to_target",
+            node_dim: int = -2,
+            decomposed_layers: int = 1,
     ) -> None:
         super().__init__()
 
@@ -202,15 +202,18 @@ class MessagePassing(torch.nn.Module):
     # Utilities ###############################################################
 
     def _check_input(
-        self,
-        edge_index: Union[Tensor, SparseTensor],
-        size: Optional[Tuple[Optional[int], Optional[int]]],
+            self,
+            edge_index: Union[Tensor, SparseTensor],
+            size: Optional[Tuple[Optional[int], Optional[int]]],
     ) -> List[Optional[int]]:
 
         if not torch.jit.is_scripting() and isinstance(edge_index, EdgeIndex):
             return [edge_index.num_rows, edge_index.num_cols]
 
-        if is_sparse(edge_index):
+        elif isinstance(edge_index, SourceIndex):
+            return [edge_index.num_rows, edge_index.num_cols]  # todo: is this right?
+
+        elif is_sparse(edge_index):
             if self.flow == 'target_to_source':
                 raise ValueError(
                     'Flow direction "target_to_source" is invalid for '
@@ -243,14 +246,15 @@ class MessagePassing(torch.nn.Module):
 
         raise ValueError(
             '`MessagePassing.propagate` only supports integer tensors of '
-            'shape `[2, num_messages]`, `torch_sparse.SparseTensor` or '
+            'shape `[2, num_messages]`, '
+            '`SourceIndex`, `torch_sparse.SparseTensor` or '
             '`torch.sparse.Tensor` for argument `edge_index`.')
 
     def _set_size(
-        self,
-        size: List[Optional[int]],
-        dim: int,
-        src: Tensor,
+            self,
+            size: List[Optional[int]],
+            dim: int,
+            src: Tensor,
     ) -> None:
         the_size = size[dim]
         if the_size is None:
@@ -290,10 +294,10 @@ class MessagePassing(torch.nn.Module):
             raise e
 
     def _lift(
-        self,
-        src: Tensor,
-        edge_index: Union[Tensor, SparseTensor],
-        dim: int,
+            self,
+            src: Tensor,
+            edge_index: Union[Tensor, SparseTensor],
+            dim: int,
     ) -> Tensor:
         if not torch.jit.is_scripting() and is_torch_sparse_tensor(edge_index):
             assert dim == 0 or dim == 1
@@ -314,6 +318,12 @@ class MessagePassing(torch.nn.Module):
                                  f"(got '{edge_index.layout}')")
             return src.index_select(self.node_dim, index)
 
+        elif isinstance(edge_index, SourceIndex):
+            if dim == 0:
+                return self._index_select(src, edge_index.flatten())
+            else:
+                return self.repeat_interleave(src, edge_index.k)
+
         elif isinstance(edge_index, Tensor):
             if torch.jit.is_scripting():  # Try/catch blocks are not supported.
                 index = edge_index[dim]
@@ -333,11 +343,11 @@ class MessagePassing(torch.nn.Module):
             'or `torch.sparse.Tensor` for argument `edge_index`.')
 
     def _collect(
-        self,
-        args: Set[str],
-        edge_index: Union[Tensor, SparseTensor],
-        size: List[Optional[int]],
-        kwargs: Dict[str, Any],
+            self,
+            args: Set[str],
+            edge_index: Union[Tensor, SparseTensor],
+            size: List[Optional[int]],
+            kwargs: Dict[str, Any],
     ) -> Dict[str, Any]:
 
         i, j = (1, 0) if self.flow == 'source_to_target' else (0, 1)
@@ -356,7 +366,7 @@ class MessagePassing(torch.nn.Module):
                         self._set_size(size, 1 - dim, data[1 - dim])
                     data = data[dim]
 
-                if isinstance(data, Tensor):
+                if isinstance(data, Tensor) or isinstance(data, SourceIndex):
                     self._set_size(size, dim, data)
                     data = self._lift(data, edge_index, dim)
 
@@ -375,6 +385,14 @@ class MessagePassing(torch.nn.Module):
                 out['edge_attr'] = None if values.dim() == 1 else values
             if out.get('edge_type', None) is None:
                 out['edge_type'] = values
+
+        elif isinstance(edge_index, SourceIndex):
+            assert self.flow == 'source_to_target'
+            out['adj_t'] = None
+            out['edge_index'] = None
+            out['edge_index_i'] = None
+            out['edge_index_j'] = edge_index.flatten()
+            out['ptr'] = None
 
         elif isinstance(edge_index, Tensor):
             out['adj_t'] = None
@@ -405,7 +423,7 @@ class MessagePassing(torch.nn.Module):
             if out.get('edge_type', None) is None:
                 out['edge_type'] = value
 
-        out['index'] = out['edge_index_i']
+        out['index'] = edge_index if isinstance(edge_index, SourceIndex) else out['edge_index_i']
         out['size'] = size
         out['size_i'] = size[i] if size[i] is not None else size[j]
         out['size_j'] = size[j] if size[j] is not None else size[i]
@@ -419,10 +437,10 @@ class MessagePassing(torch.nn.Module):
         r"""Runs the forward pass of the module."""
 
     def propagate(
-        self,
-        edge_index: Adj,
-        size: Size = None,
-        **kwargs: Any,
+            self,
+            edge_index: Adj,
+            size: Size = None,
+            **kwargs: Any,
     ) -> Tensor:
         r"""The initial call to start propagating messages.
 
@@ -517,12 +535,12 @@ class MessagePassing(torch.nn.Module):
                 msg_kwargs = self.inspector.collect_param_data(
                     'message', coll_dict)
                 for hook in self._message_forward_pre_hooks.values():
-                    res = hook(self, (msg_kwargs, ))
+                    res = hook(self, (msg_kwargs,))
                     if res is not None:
                         msg_kwargs = res[0] if isinstance(res, tuple) else res
                 out = self.message(**msg_kwargs)
                 for hook in self._message_forward_hooks.values():
-                    res = hook(self, (msg_kwargs, ), out)
+                    res = hook(self, (msg_kwargs,), out)
                     if res is not None:
                         out = res
 
@@ -534,14 +552,14 @@ class MessagePassing(torch.nn.Module):
                 aggr_kwargs = self.inspector.collect_param_data(
                     'aggregate', coll_dict)
                 for hook in self._aggregate_forward_pre_hooks.values():
-                    res = hook(self, (aggr_kwargs, ))
+                    res = hook(self, (aggr_kwargs,))
                     if res is not None:
                         aggr_kwargs = res[0] if isinstance(res, tuple) else res
 
                 out = self.aggregate(out, **aggr_kwargs)
 
                 for hook in self._aggregate_forward_hooks.values():
-                    res = hook(self, (aggr_kwargs, ), out)
+                    res = hook(self, (aggr_kwargs,), out)
                     if res is not None:
                         out = res
 
@@ -575,11 +593,11 @@ class MessagePassing(torch.nn.Module):
         return x_j
 
     def aggregate(
-        self,
-        inputs: Tensor,
-        index: Tensor,
-        ptr: Optional[Tensor] = None,
-        dim_size: Optional[int] = None,
+            self,
+            inputs: Tensor,
+            index: Tensor,
+            ptr: Optional[Tensor] = None,
+            dim_size: Optional[int] = None,
     ) -> Tensor:
         r"""Aggregates messages from neighbors as
         :math:`\bigoplus_{j \in \mathcal{N}(i)}`.
@@ -618,10 +636,10 @@ class MessagePassing(torch.nn.Module):
     # Edge-level Updates ######################################################
 
     def edge_updater(
-        self,
-        edge_index: Adj,
-        size: Size = None,
-        **kwargs: Any,
+            self,
+            edge_index: Adj,
+            size: Size = None,
+            **kwargs: Any,
     ) -> Tensor:
         r"""The initial call to compute or update features for each edge in the
         graph.
@@ -741,9 +759,9 @@ class MessagePassing(torch.nn.Module):
                         self, MessagePassing)
 
     def explain_message(
-        self,
-        inputs: Tensor,
-        dim_size: Optional[int],
+            self,
+            inputs: Tensor,
+            dim_size: Optional[int],
     ) -> Tensor:
         # NOTE Replace this method in custom explainers per message-passing
         # layer to customize how messages shall be explained, e.g., via:
@@ -774,8 +792,8 @@ class MessagePassing(torch.nn.Module):
     # Hooks ###################################################################
 
     def register_propagate_forward_pre_hook(
-        self,
-        hook: Callable,
+            self,
+            hook: Callable,
     ) -> RemovableHandle:
         r"""Registers a forward pre-hook on the module.
 
@@ -798,8 +816,8 @@ class MessagePassing(torch.nn.Module):
         return handle
 
     def register_propagate_forward_hook(
-        self,
-        hook: Callable,
+            self,
+            hook: Callable,
     ) -> RemovableHandle:
         r"""Registers a forward hook on the module.
 
@@ -823,8 +841,8 @@ class MessagePassing(torch.nn.Module):
         return handle
 
     def register_message_forward_pre_hook(
-        self,
-        hook: Callable,
+            self,
+            hook: Callable,
     ) -> RemovableHandle:
         r"""Registers a forward pre-hook on the module.
         The hook will be called every time before :meth:`message` is invoked.
@@ -845,8 +863,8 @@ class MessagePassing(torch.nn.Module):
         return handle
 
     def register_aggregate_forward_pre_hook(
-        self,
-        hook: Callable,
+            self,
+            hook: Callable,
     ) -> RemovableHandle:
         r"""Registers a forward pre-hook on the module.
         The hook will be called every time before :meth:`aggregate` is invoked.
@@ -857,8 +875,8 @@ class MessagePassing(torch.nn.Module):
         return handle
 
     def register_aggregate_forward_hook(
-        self,
-        hook: Callable,
+            self,
+            hook: Callable,
     ) -> RemovableHandle:
         r"""Registers a forward hook on the module.
         The hook will be called every time after :meth:`aggregate` has computed
@@ -870,8 +888,8 @@ class MessagePassing(torch.nn.Module):
         return handle
 
     def register_message_and_aggregate_forward_pre_hook(
-        self,
-        hook: Callable,
+            self,
+            hook: Callable,
     ) -> RemovableHandle:
         r"""Registers a forward pre-hook on the module.
         The hook will be called every time before :meth:`message_and_aggregate`
@@ -883,8 +901,8 @@ class MessagePassing(torch.nn.Module):
         return handle
 
     def register_message_and_aggregate_forward_hook(
-        self,
-        hook: Callable,
+            self,
+            hook: Callable,
     ) -> RemovableHandle:
         r"""Registers a forward hook on the module.
         The hook will be called every time after :meth:`message_and_aggregate`
@@ -896,8 +914,8 @@ class MessagePassing(torch.nn.Module):
         return handle
 
     def register_edge_update_forward_pre_hook(
-        self,
-        hook: Callable,
+            self,
+            hook: Callable,
     ) -> RemovableHandle:
         r"""Registers a forward pre-hook on the module.
         The hook will be called every time before :meth:`edge_update` is
@@ -909,8 +927,8 @@ class MessagePassing(torch.nn.Module):
         return handle
 
     def register_edge_update_forward_hook(
-        self,
-        hook: Callable,
+            self,
+            hook: Callable,
     ) -> RemovableHandle:
         r"""Registers a forward hook on the module.
         The hook will be called every time after :meth:`edge_update` has

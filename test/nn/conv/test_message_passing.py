@@ -159,8 +159,7 @@ def test_my_conv_edge_index():
 
 def test_my_conv_source_index():
     x = torch.randn(4, 8)
-    # source_index = torch.tensor([[0, 0, 1, 1], [1, 1, 2, 2], [2, 2, 3, 3], [3, 3, 3, 3]])
-    source_index = torch.tensor([[0], [0], [1], [1]])
+    source_index = torch.tensor([[0, 0, 1], [1, 1, 2], [2, 2, 3], [3, 3, 3]])
     source_index = SourceIndex(source_index, sparse_size=(4, 4), sort_order='id')
 
     conv = MyConv(8, 32)

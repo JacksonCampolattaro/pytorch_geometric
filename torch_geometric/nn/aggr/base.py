@@ -3,6 +3,7 @@ from typing import Final, Optional, Tuple
 import torch
 from torch import Tensor
 
+from torch_geometric import SourceIndex
 from torch_geometric.experimental import disable_dynamic_shapes
 from torch_geometric.utils import scatter, segment, to_dense_batch
 
@@ -59,21 +60,22 @@ class Aggregation(torch.nn.Module):
         - **output:** graph features :math:`(*, |\mathcal{G}|, F_{out})` or
           node features :math:`(*, |\mathcal{V}|, F_{out})`
     """
+
     def __init__(self) -> None:
         super().__init__()
 
         self._deterministic: Final[bool] = (
-            torch.are_deterministic_algorithms_enabled()
-            or torch.is_deterministic_algorithms_warn_only_enabled())
+                torch.are_deterministic_algorithms_enabled()
+                or torch.is_deterministic_algorithms_warn_only_enabled())
 
     def forward(
-        self,
-        x: Tensor,
-        index: Optional[Tensor] = None,
-        ptr: Optional[Tensor] = None,
-        dim_size: Optional[int] = None,
-        dim: int = -2,
-        max_num_elements: Optional[int] = None,
+            self,
+            x: Tensor,
+            index: Optional[Tensor] = None,
+            ptr: Optional[Tensor] = None,
+            dim_size: Optional[int] = None,
+            dim: int = -2,
+            max_num_elements: Optional[int] = None,
     ) -> Tensor:
         r"""Forward pass.
 
@@ -100,13 +102,13 @@ class Aggregation(torch.nn.Module):
 
     @disable_dynamic_shapes(required_args=['dim_size'])
     def __call__(
-        self,
-        x: Tensor,
-        index: Optional[Tensor] = None,
-        ptr: Optional[Tensor] = None,
-        dim_size: Optional[int] = None,
-        dim: int = -2,
-        **kwargs,
+            self,
+            x: Tensor,
+            index: Optional[Tensor] = None,
+            ptr: Optional[Tensor] = None,
+            dim_size: Optional[int] = None,
+            dim: int = -2,
+            **kwargs,
     ) -> Tensor:
 
         if dim >= x.dim() or dim < -x.dim():
@@ -174,6 +176,21 @@ class Aggregation(torch.nn.Module):
                ptr: Optional[Tensor] = None, dim_size: Optional[int] = None,
                dim: int = -2, reduce: str = 'sum') -> Tensor:
 
+        if isinstance(index, SourceIndex):
+            x = x.reshape(-1, index.k, x.shape[-1])
+            if reduce == 'sum':
+                return x.sum(dim=1)
+            elif reduce == 'max':
+                return x.amax(dim=1)
+            elif reduce == 'min':
+                return x.amin(dim=1)
+            elif reduce == 'mean':
+                return x.mean(dim=1)
+            elif reduce == 'prod':
+                return x.prod(dim=1)
+            else:
+                raise NotImplementedError(f"Unsupported reduction '{reduce}'")
+
         if ptr is not None:
             if index is None or self._deterministic:
                 ptr = expand_left(ptr, dim, dims=x.dim())
@@ -185,14 +202,14 @@ class Aggregation(torch.nn.Module):
         return scatter(x, index, dim, dim_size, reduce)
 
     def to_dense_batch(
-        self,
-        x: Tensor,
-        index: Optional[Tensor] = None,
-        ptr: Optional[Tensor] = None,
-        dim_size: Optional[int] = None,
-        dim: int = -2,
-        fill_value: float = 0.0,
-        max_num_elements: Optional[int] = None,
+            self,
+            x: Tensor,
+            index: Optional[Tensor] = None,
+            ptr: Optional[Tensor] = None,
+            dim_size: Optional[int] = None,
+            dim: int = -2,
+            fill_value: float = 0.0,
+            max_num_elements: Optional[int] = None,
     ) -> Tuple[Tensor, Tensor]:
 
         # TODO Currently, `to_dense_batch` can only operate on `index`:
