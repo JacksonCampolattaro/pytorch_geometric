@@ -390,7 +390,7 @@ class MessagePassing(torch.nn.Module):
             assert self.flow == 'source_to_target'
             out['adj_t'] = None
             out['edge_index'] = None
-            out['edge_index_i'] = None
+            out['edge_index_i'] = edge_index.get_target_index()
             out['edge_index_j'] = edge_index.flatten()
             out['ptr'] = None
 
