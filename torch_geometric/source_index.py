@@ -420,8 +420,7 @@ class SourceIndex(Tensor):
         #   `torch.cat(dim=1)` can inherit the sparse matrix size, or
         #   `torch.narrow(dim=1)` can inherit cached pointers.
         # * not all operations lead to valid `SourceIndex` tensors again, e.g.,
-        #   `torch.sum()` does not yield a `SourceIndex` as its output, or
-        #   `torch.cat(dim=0) violates the [2, *] shape assumption.
+        #   `torch.sum()` does not yield a `SourceIndex` as its output
 
         # To account for this, we hold a number of `HANDLED_FUNCTIONS` that
         # implement specific functions for valid `SourceIndex` routines.
