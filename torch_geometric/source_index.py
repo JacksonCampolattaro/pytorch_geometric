@@ -369,7 +369,7 @@ class SourceIndex(Tensor):
 
     def get_target_index(self) -> Tensor:
         # todo: No TargetIndex type yet; maybe not needed?
-        return torch.arange(self.num_rows, device=self.device, dtype=self.dtype).expand([-1, self.k])
+        return torch.arange(self.num_cols, device=self.device, dtype=self.dtype).unsqueeze(-1).expand([-1, self.k])
 
     def to_edge_index(self) -> EdgeIndex:
         return EdgeIndex(torch.stack([
