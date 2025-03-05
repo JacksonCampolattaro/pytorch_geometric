@@ -367,10 +367,14 @@ class SourceIndex(Tensor):
 
         raise NotImplementedError("SourceIndex.sort_by not yet implemented")
 
+    def get_target_index(self) -> Tensor:
+        # todo: No TargetIndex type yet; maybe not needed?
+        return torch.arange(self.num_rows, device=self.device, dtype=self.dtype).expand([-1, self.k])
+
     def to_edge_index(self) -> EdgeIndex:
         return EdgeIndex(torch.stack([
             self.flatten(),  # todo: maybe sort last dim, for efficiency?
-            torch.arange(self.num_rows, device=self.device).repeat_interleave(self.k),
+            self.get_target_index().flatten(),
         ], dim=0), sparse_size=self.sparse_size)
 
     # PyTorch/Python builtins #################################################
