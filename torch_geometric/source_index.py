@@ -134,7 +134,7 @@ class SourceIndex(Tensor):
         assert isinstance(data, Tensor)
 
         if isinstance(data, cls):  # If passed `SourceIndex`, inherit metadata:
-            sparse_size = sparse_size or data.sparse_size()
+            sparse_size = sparse_size or data.sparse_size
             sort_order = sort_order or data.sort_order
 
         # Convert `torch.sparse` tensors to `SourceIndex` representation:
@@ -200,11 +200,11 @@ class SourceIndex(Tensor):
                              f"values smaller than {self.num_rows})")
 
         if (self.numel() > 0 and self.num_cols is not None
-                and self._data.size(0) >= self.num_cols):
-            raise ValueError(f"'{self.__class__.__name__}' contains more "
-                             f"K tables than its number of cols"  # todo: better name?
+                and self._data.size(0) != self.num_cols):
+            raise ValueError(f"'{self.__class__.__name__}' contains a different"
+                             f"number of K tables than its number of cols"
                              f"(got {int(self._data.size(0))}, but expected "
-                             f"fewer than than {self.num_cols})")
+                             f"{self.num_cols})")
 
         if self.is_sorted_by_id and (self._data.diff(dim=-1) < 0).any():
             raise ValueError(f"'{self.__class__.__name__}' is not sorted by "
@@ -226,6 +226,7 @@ class SourceIndex(Tensor):
     def sparse_size(self, dim: int) -> Optional[int]:
         pass
 
+    @property
     def sparse_size(
             self,
             dim: Optional[int] = None,
@@ -439,7 +440,7 @@ class SourceIndex(Tensor):
         tensor_str = torch._tensor_str._tensor_str(self._data, indent)
 
         suffixes = []
-        num_rows, num_cols = self.sparse_size()
+        num_rows, num_cols = self.sparse_size
         if num_rows is not None or num_cols is not None:
             size_repr = f"({num_rows or '?'}, {num_cols or '?'})"
             suffixes.append(f'sparse_size={size_repr}')
@@ -468,7 +469,7 @@ class SourceIndex(Tensor):
 
     def _shallow_copy(self) -> 'SourceIndex':
         out = SourceIndex(self._data)
-        out._sparse_size = self._sparse_size()
+        out._sparse_size = self._sparse_size
         out._sort_order = self._sort_order
         out._cat_metadata = self._cat_metadata
         return out
@@ -572,37 +573,19 @@ def _cat(
 
     out = SourceIndex(data)
 
-    sparse_size_list = [t.sparse_size() for t in tensors]  # type: ignore
+    sparse_size_list = [t.sparse_size for t in tensors]  # type: ignore
     sort_order_list = [t._sort_order for t in tensors]  # type: ignore
 
-    if dim in [0, -2]:
+    total_num_rows: Optional[int] = out.size(0)
+    total_num_cols: Optional[int] = 0
+    for num_cols, _ in sparse_size_list:
+        if num_cols is None:
+            total_num_cols = None
+            break
+        assert isinstance(total_num_cols, int)
+        total_num_cols = max(num_cols, total_num_cols)
 
-        total_num_rows: Optional[int] = sparse_size_list[0][0]
-
-        # Concat along N dimension increases num_cols
-        total_num_cols: Optional[int] = 0
-        for _, num_cols in sparse_size_list:
-            if num_cols is None:
-                total_num_cols = None
-                break
-            assert isinstance(total_num_cols, int)
-            total_num_cols += num_cols
-
-    else:
-
-        # Concat along K dimension _may_ increase num_rows
-        total_num_rows: Optional[int] = 0
-        if dim in [0, -2]:
-            for num_rows, _ in sparse_size_list:
-                if num_rows is None:
-                    total_num_rows = None
-                    break
-                assert isinstance(total_num_rows, int)
-                total_num_rows = max(num_rows, total_num_rows)
-
-        total_num_cols: Optional[int] = sparse_size_list[0][1]
-
-    out._sparse_size = (total_num_rows, total_num_cols)
+    out._sparse_size = (total_num_cols, total_num_rows)
 
     out._cat_metadata = CatMetadata(
         sparse_size=sparse_size_list,
@@ -620,12 +603,13 @@ def _index_select(
 ) -> Union[SourceIndex, Tensor]:
     out = aten.index_select.default(input._data, dim, index)
 
-    if len(out.size) == 2:
+    if len(out.shape) == 2:
         # Indexing produces a valid SourceIndex as long as the output is still 2D
         out = SourceIndex(out)
         # The N dimension may be reduced by indexing
-        out._sparse_size = (out.size(0), input.sparse_size()[1])
+        out._sparse_size = (input.sparse_size[0], out.size(0))
 
+    # todo: taking a row or column should return a (1-d) Index
     return out
 
 
@@ -648,7 +632,7 @@ def _slice(
             out = out.contiguous()
 
         out = SourceIndex(out)
-        out._sparse_size = (out.size(0), input.sparse_size()[1])
+        out._sparse_size = (input.sparse_size[0], out.size(0))
         out._sort_order = input._sort_order
 
     return out
@@ -665,14 +649,11 @@ def _index(
 
     out = aten.index.Tensor(input._data, indices)
 
-    if len(indices) != 2 or indices[0] is not None:
+    if len(out.shape) != 2:
         return out
 
-    index = indices[1]
-    assert isinstance(index, Tensor)
-
     out = SourceIndex(out)
-    out._sparse_size = (out.size(0), input.sparse_size()[1])
+    out._sparse_size = (input.sparse_size[0], out.size(0))
 
     return out
 
@@ -704,20 +685,22 @@ def _unbind(
 
 @implements(aten.add.Tensor)
 def _add(
-        input: SourceIndex,
+        input: Union[int, Tensor, SourceIndex],
         other: Union[int, Tensor, SourceIndex],
         *,
         alpha: int = 1,
 ) -> Union[SourceIndex, Tensor]:
+    sparse_size = input.sparse_size if isinstance(input, SourceIndex) else other.sparse_size
+
     out = aten.add.Tensor(
-        input._data,
+        input._data if isinstance(input, SourceIndex) else input,
         other._data if isinstance(other, SourceIndex) else other,
         alpha=alpha,
     )
 
     if out.dtype not in INDEX_DTYPES:
         return out
-    if out.dim() != 2 or out.size(0) != input.num_cols:
+    if out.shape != input.shape:
         return out
 
     out = SourceIndex(out)
@@ -725,17 +708,13 @@ def _add(
     if isinstance(other, Tensor) and other.numel() <= 1:
         other = int(other)
 
-    if isinstance(other, int):
-        size = maybe_add(input._sparse_size, other, alpha)
-        assert len(size) == 2
-        out._sparse_size = size
-        out._sort_order = input._sort_order
-
+    total_num_cols: Optional[int] = sparse_size[0]
+    if isinstance(other, int) and sparse_size[0] is not None:
+        total_num_cols = sparse_size[0] + (other * alpha)
     elif isinstance(other, SourceIndex):
-        size = maybe_add(input._sparse_size, other._sparse_size, alpha)
-        assert len(size) == 2
-        out._sparse_size = size
+        raise NotImplementedError('Additions between SourceIndex are not implemented')
 
+    out._sparse_size = (total_num_cols, out.size(0))
     return out
 
 
@@ -747,8 +726,6 @@ def add_(
         alpha: int = 1,
 ) -> SourceIndex:
     sparse_size = input._sparse_size
-    sort_order = input._sort_order
-    input._clear_metadata()
 
     aten.add_.Tensor(
         input._data,
@@ -763,7 +740,6 @@ def add_(
         size = maybe_add(sparse_size, other, alpha)
         assert len(size) == 2
         input._sparse_size = size
-        input._sort_order = sort_order
 
     elif isinstance(other, SourceIndex):
         size = maybe_add(sparse_size, other._sparse_size, alpha)
@@ -780,15 +756,17 @@ def _sub(
         *,
         alpha: int = 1,
 ) -> Union[SourceIndex, Tensor]:
+    sparse_size = input.sparse_size if isinstance(input, SourceIndex) else other.sparse_size
+
     out = aten.sub.Tensor(
-        input._data,
+        input._data if isinstance(input, SourceIndex) else input,
         other._data if isinstance(other, SourceIndex) else other,
         alpha=alpha,
     )
 
     if out.dtype not in INDEX_DTYPES:
         return out
-    if out.dim() != 2 or out.size(0) != 2:
+    if out.shape != input.shape:
         return out
 
     out = SourceIndex(out)
@@ -796,12 +774,13 @@ def _sub(
     if isinstance(other, Tensor) and other.numel() <= 1:
         other = int(other)
 
-    if isinstance(other, int):
-        size = maybe_sub(input._sparse_size, other, alpha)
-        assert len(size) == 2
-        out._sparse_size = size
-        out._sort_order = input._sort_order
+    total_num_cols: Optional[int] = sparse_size[0]
+    if isinstance(other, int) and sparse_size[0] is not None:
+        total_num_cols = sparse_size[0] - (other * alpha)
+    elif isinstance(other, SourceIndex):
+        raise NotImplementedError('Additions between SourceIndex are not implemented')
 
+    out._sparse_size = (total_num_cols, out.size(0))
     return out
 
 
