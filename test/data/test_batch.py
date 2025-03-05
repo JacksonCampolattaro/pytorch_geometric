@@ -173,7 +173,7 @@ def test_edge_index():
         assert data.edge_index.is_undirected == edge_index.is_undirected
 
 
-def test_source_index():
+def test_batch_with_source_index():
     edge_index1 = SourceIndex(
         [[0, 1], [1, 0], [1, 2], [2, 1]],
         sparse_size=(3, 4),
@@ -189,10 +189,9 @@ def test_source_index():
     batch = Batch.from_data_list([data1, data2])
 
     assert len(batch) == 2
-    assert batch.batch.equal(torch.tensor([0, 0, 0, 0, 1, 1, 1]))
-    assert batch.ptr.equal(torch.tensor([0, 4, 7]))
-    assert isinstance(batch.edge_index, EdgeIndex)
-    raise NotImplementedError("This unit test is not yet complete")
+    assert batch.batch.equal(torch.tensor([0, 0, 0, 1, 1, 1]))
+    assert batch.ptr.equal(torch.tensor([0, 3, 6]))
+    assert isinstance(batch.edge_index, SourceIndex)
 
 
 @withPackage('torch_sparse')

@@ -647,11 +647,11 @@ class Data(BaseData, FeatureStore, GraphStore):
         return self
 
     def __cat_dim__(self, key: str, value: Any, *args, **kwargs) -> Any:
-        if isinstance(value, SourceIndex):
-            return 0
         if is_sparse(value) and ('adj' in key or 'edge_index' in key):
             return (0, 1)
         elif 'index' in key or key == 'face':
+            if isinstance(value, SourceIndex):
+                return 0
             return -1
         else:
             return 0

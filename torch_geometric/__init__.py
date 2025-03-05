@@ -78,6 +78,8 @@ if torch_geometric.typing.WITH_PT24:
         EdgeIndex,
         torch_geometric.edge_index.SortOrder,
         torch_geometric.edge_index.CatMetadata,
-        HashTensor,
         SourceIndex,
+        torch_geometric.source_index.SortOrder,
+        torch_geometric.source_index.CatMetadata,
+        HashTensor,
     ])
