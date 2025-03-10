@@ -25,7 +25,7 @@ from torch import Tensor
 import torch_geometric.typing
 from torch_geometric import Index, is_compiling
 from torch_geometric.index import index2ptr, ptr2index
-from torch_geometric.typing import INDEX_DTYPES
+from torch_geometric.typing import INDEX_DTYPES, SparseTensor
 
 from torch_geometric.edge_index import (set_tuple_item, EdgeIndex, maybe_add, maybe_sub)
 
@@ -377,6 +377,28 @@ class SourceIndex(Tensor):
             self.get_target_index().flatten(),
         ], dim=0), sparse_size=self.sparse_size)
 
+    def to_sparse_tensor(self) -> SparseTensor:
+        r"""Converts the :class:`SourceIndex` to a :class:`SparseTensor`.
+
+        Returns:
+            SparseTensor: The resulting sparse tensor.
+        """
+        # Flatten the SourceIndex to get the row indices:
+        row_indices = self.flatten()
+
+        # Get the target indices (column indices) for the sparse tensor:
+        col_indices = self.get_target_index().flatten()
+
+        # Create the SparseTensor using the row and col indices:
+        sparse_tensor = SparseTensor(
+            row=row_indices,
+            col=col_indices,
+            sparse_sizes=self.sparse_size,
+            is_sorted=self.is_sorted_by_id,  # Assume sorted by ID if sorted
+            trust_data=True,  # Trust the data since it's validated
+        )
+
+        return sparse_tensor
     # PyTorch/Python builtins #################################################
 
     def __tensor_flatten__(self) -> Tuple[List[str], Tuple[Any, ...]]:
