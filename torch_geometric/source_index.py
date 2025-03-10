@@ -369,6 +369,7 @@ class SourceIndex(Tensor):
 
     def get_target_index(self) -> Tensor:
         # todo: No TargetIndex type yet; maybe not needed?
+        # todo: equivalent to self-edges if present in column 0
         return torch.arange(self.num_cols, device=self.device, dtype=self.dtype).unsqueeze(-1).expand([-1, self.k])
 
     def to_edge_index(self) -> EdgeIndex:
@@ -393,7 +394,7 @@ class SourceIndex(Tensor):
         sparse_tensor = SparseTensor(
             row=row_indices,
             col=col_indices,
-            sparse_sizes=self.sparse_size,
+            sparse_sizes=(self.sparse_size[1], self.sparse_size[0]),
             is_sorted=self.is_sorted_by_id,  # Assume sorted by ID if sorted
             trust_data=True,  # Trust the data since it's validated
         )

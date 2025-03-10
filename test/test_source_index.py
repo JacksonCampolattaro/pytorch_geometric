@@ -7,7 +7,7 @@ import torch
 from torch import tensor
 
 import torch_geometric.typing
-from torch_geometric import SourceIndex
+from torch_geometric import SourceIndex, Index
 from torch_geometric.data import Data
 from torch_geometric.io import fs
 from torch_geometric.testing import onlyCUDA, withCUDA
@@ -243,6 +243,11 @@ def test_getitem(dtype, device):
     assert out.sparse_size == (3, 2)
 
     out = index[tensor([1, 3], device=device)]
+    assert isinstance(out, SourceIndex)
+    assert out.equal(tensor([[1, 1], [2, 2]], device=device))
+    assert out.sparse_size == (3, 2)
+
+    out = index[Index(tensor([1, 3], device=device))]
     assert isinstance(out, SourceIndex)
     assert out.equal(tensor([[1, 1], [2, 2]], device=device))
     assert out.sparse_size == (3, 2)
