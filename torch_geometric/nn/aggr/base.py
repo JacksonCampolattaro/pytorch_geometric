@@ -177,6 +177,9 @@ class Aggregation(torch.nn.Module):
                dim: int = -2, reduce: str = 'sum') -> Tensor:
 
         if isinstance(index, SourceIndex):
+            if index.k == 1:
+                return x
+
             x = x.reshape(-1, index.k, x.shape[-1])
             if reduce == 'sum':
                 return x.sum(dim=1)
