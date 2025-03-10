@@ -108,20 +108,20 @@ class ToSparseTensor(BaseTransform):
                 # Check if edge_index is a SourceIndex instance
                 if isinstance(store.edge_index, SourceIndex):
                     # Convert SourceIndex to EdgeIndex
-                    edge_index = store.edge_index.to_edge_index()
+                    edge_index = store.edge_index.to_edge_index().as_tensor()
                 else:
                     # Handle regular edge_index
                     edge_index = store.edge_index
 
-                # Sort the edge_index and associated values
-                edge_index, values = sort_edge_index(
-                    edge_index,
-                    values,
-                    sort_by_row=False,
-                )
+                    # Sort the edge_index and associated values
+                    edge_index, values = sort_edge_index(
+                        edge_index,
+                        values,
+                        sort_by_row=False,
+                    )
 
-                for key, value in zip(keys, values):
-                    store[key] = value
+                    for key, value in zip(keys, values):
+                        store[key] = value
 
             elif has_source_index:
                 # Convert SourceIndex to EdgeIndex for processing
