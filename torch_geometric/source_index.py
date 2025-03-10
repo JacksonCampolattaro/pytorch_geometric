@@ -385,10 +385,10 @@ class SourceIndex(Tensor):
             SparseTensor: The resulting sparse tensor.
         """
         # Flatten the SourceIndex to get the row indices:
-        row_indices = self.flatten()
+        col_indices = self.flatten()
 
         # Get the target indices (column indices) for the sparse tensor:
-        col_indices = self.get_target_index().flatten()
+        row_indices = self.get_target_index().flatten()
 
         # Create the SparseTensor using the row and col indices:
         sparse_tensor = SparseTensor(
