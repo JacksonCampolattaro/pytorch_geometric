@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 
 import torch_geometric.typing
-from torch_geometric import EdgeIndex
+from torch_geometric import EdgeIndex, SourceIndex
 from torch_geometric.typing import Adj, SparseTensor, torch_sparse
 from torch_geometric.utils import is_torch_sparse_tensor, scatter
 
@@ -36,6 +36,9 @@ def spmm(
 
     if not torch.jit.is_scripting() and isinstance(src, EdgeIndex):
         return src.matmul(other=other, reduce=reduce)  # type: ignore
+
+    if isinstance(src, SourceIndex):
+        src = src.to_sparse_tensor()
 
     if isinstance(src, SparseTensor):
         if src.nnz() == 0:

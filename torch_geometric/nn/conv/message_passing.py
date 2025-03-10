@@ -486,7 +486,7 @@ class MessagePassing(torch.nn.Module):
         # Run "fused" message and aggregation (if applicable).
         fuse = False
         if self.fuse and not self.explain:
-            if is_sparse(edge_index):
+            if is_sparse(edge_index) or isinstance(edge_index, SourceIndex):
                 fuse = True
             elif (not torch.jit.is_scripting()
                   and isinstance(edge_index, EdgeIndex)):
