@@ -211,7 +211,7 @@ class MessagePassing(torch.nn.Module):
             return [edge_index.num_rows, edge_index.num_cols]
 
         elif isinstance(edge_index, SourceIndex):
-            return [edge_index.num_rows, edge_index.num_cols]  # todo: is this right?
+            return [edge_index.num_target_nodes, edge_index.num_source_nodes]  # todo: is this right?
 
         elif is_sparse(edge_index):
             if self.flow == 'target_to_source':
@@ -392,7 +392,7 @@ class MessagePassing(torch.nn.Module):
             out['edge_index'] = None
             out['edge_index_i'] = edge_index.get_target_index()
             out['edge_index_j'] = edge_index.flatten()
-            out['ptr'] = None
+            out['ptr'] = None  # todo: maybe this can help performance?
 
         elif isinstance(edge_index, Tensor):
             out['adj_t'] = None

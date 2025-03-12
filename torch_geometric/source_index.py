@@ -40,8 +40,7 @@ class SortOrder(Enum):
 
 
 class CatMetadata(NamedTuple):
-    # todo: is this really necessary here?
-    sparse_size: List[Tuple[Optional[int], Optional[int]]]
+    dim_size: List[Optional[int]]
     sort_order: List[Optional[SortOrder]]
 
 
@@ -93,7 +92,7 @@ class SourceIndex(Tensor):
 
     :class:`SourceIndex` is a :pytorch:`null` :class:`torch.Tensor`, that holds
     an :obj:`edge_index` representation of shape :obj:`[num_source_nodes, K]`.
-    todo: longer description
+    The source indices represent connections to target nodes.
     """
     # See "https://pytorch.org/docs/stable/notes/extending.html"
     # for a basic tutorial on how to subclass `torch.Tensor`.
@@ -101,8 +100,8 @@ class SourceIndex(Tensor):
     # The underlying tensor representation:
     _data: Tensor
 
-    # The size of the underlying sparse matrix:
-    _sparse_size: Tuple[Optional[int], Optional[int]] = (None, None)
+    # The size of the dimension (number of source nodes):
+    _dim_size: Optional[int] = None
 
     # Whether the `edge_index` representation is non-sorted (`None`), or sorted
     # based on distances or indices.
@@ -117,6 +116,7 @@ class SourceIndex(Tensor):
             cls: Type,
             data: Any,
             *args: Any,
+            dim_size: Optional[int] = None,
             sparse_size: Optional[Tuple[Optional[int], Optional[int]]] = None,
             sort_order: Optional[Union[str, SortOrder]] = None,
             **kwargs: Any,
@@ -134,8 +134,17 @@ class SourceIndex(Tensor):
         assert isinstance(data, Tensor)
 
         if isinstance(data, cls):  # If passed `SourceIndex`, inherit metadata:
-            sparse_size = sparse_size or data.sparse_size
+            dim_size = dim_size or data.dim_size
             sort_order = sort_order or data.sort_order
+
+        # For backward compatibility, handle sparse_size if provided
+        if sparse_size is not None and dim_size is None:
+            dim_size = sparse_size[0]
+            if sparse_size[1] is not None and sparse_size[1] != data.size(0):
+                import warnings
+                warnings.warn(
+                    f"Inconsistent number of source nodes in sparse_size "
+                    f"(got {sparse_size[1]}, but tensor has {data.size(0)})")
 
         # Convert `torch.sparse` tensors to `SourceIndex` representation:
         if data.layout == torch.sparse_coo:
@@ -148,9 +157,6 @@ class SourceIndex(Tensor):
         assert_valid_dtype(data)
         assert_two_dimensional(data)
         assert_contiguous(data)
-
-        if sparse_size is None:
-            sparse_size = (None, None)
 
         out = Tensor._make_wrapper_subclass(  # type: ignore
             cls,
@@ -165,7 +171,7 @@ class SourceIndex(Tensor):
 
         # Attach metadata:
         out._data = data
-        out._sparse_size = sparse_size
+        out._dim_size = dim_size
         out._sort_order = None if sort_order is None else SortOrder(sort_order)
 
         if isinstance(data, cls):  # If passed `SourceIndex`, inherit metadata:
@@ -182,7 +188,7 @@ class SourceIndex(Tensor):
 
         * it only holds valid indices.
         * the sort order is correctly set.
-        * indices are bidirectional in case it is specified as undirected.
+        * indices are consistent with the dimension size if specified.
         """
         assert_valid_dtype(self._data)
         assert_two_dimensional(self._data)
@@ -192,19 +198,12 @@ class SourceIndex(Tensor):
             raise ValueError(f"'{self.__class__.__name__}' contains negative "
                              f"indices (got {int(self.min())})")
 
-        if (self.numel() > 0 and self.num_rows is not None
-                and self._data[0].max() >= self.num_rows):
+        if (self.numel() > 0 and self._dim_size is not None
+                and self._data.max() >= self._dim_size):
             raise ValueError(f"'{self.__class__.__name__}' contains larger "
-                             f"indices than its number of rows "
-                             f"(got {int(self._data[0].max())}, but expected "
-                             f"values smaller than {self.num_rows})")
-
-        if (self.numel() > 0 and self.num_cols is not None
-                and self._data.size(0) != self.num_cols):
-            raise ValueError(f"'{self.__class__.__name__}' contains a different"
-                             f"number of K tables than its number of cols"
-                             f"(got {int(self._data.size(0))}, but expected "
-                             f"{self.num_cols})")
+                             f"indices than its dimension size "
+                             f"(got {int(self._data.max())}, but expected "
+                             f"values smaller than {self._dim_size})")
 
         if self.is_sorted_by_id and (self._data.diff(dim=-1) < 0).any():
             raise ValueError(f"'{self.__class__.__name__}' is not sorted by "
@@ -218,40 +217,20 @@ class SourceIndex(Tensor):
 
     # Properties ##############################################################
 
-    @overload
-    def sparse_size(self) -> Tuple[Optional[int], Optional[int]]:
-        pass
-
-    @overload
-    def sparse_size(self, dim: int) -> Optional[int]:
-        pass
+    @property
+    def dim_size(self) -> Optional[int]:
+        r"""The dimension size (number of source nodes)."""
+        return self._dim_size
 
     @property
-    def sparse_size(
-            self,
-            dim: Optional[int] = None,
-    ) -> Union[Tuple[Optional[int], Optional[int]], Optional[int]]:
-        r"""The size of the underlying sparse matrix.
-        If :obj:`dim` is specified, returns an integer holding the size of that
-        sparse dimension.
-
-        Args:
-            dim (int, optional): The dimension for which to retrieve the size.
-                (default: :obj:`None`)
-        """
-        if dim is not None:
-            return self._sparse_size[dim]
-        return self._sparse_size
+    def num_target_nodes(self) -> Optional[int]:
+        r"""The number of target nodes."""
+        return self._data.size(0)
 
     @property
-    def num_rows(self) -> Optional[int]:
-        r"""The number of rows of the underlying sparse matrix."""
-        return self._sparse_size[0]
-
-    @property
-    def num_cols(self) -> Optional[int]:
-        r"""The number of columns of the underlying sparse matrix."""
-        return self._sparse_size[1]
+    def num_source_nodes(self) -> int:
+        r"""The number of source nodes."""
+        return self._dim_size
 
     @property
     def k(self) -> int:
@@ -285,51 +264,75 @@ class SourceIndex(Tensor):
         # TODO Remove once PyTorch does not override `dtype` in `DataLoader`.
         return self._data.dtype
 
+    # For backward compatibility
+    @property
+    def sparse_size(self) -> Tuple[Optional[int], int]:
+        r"""The size of the underlying sparse matrix (deprecated).
+        Use dim_size and num_source_nodes instead.
+        """
+        # todo: maybe remove this?
+        # import warnings
+        # warnings.warn(
+        #     "sparse_size is deprecated, use dim_size and num_source_nodes instead",
+        #     DeprecationWarning, stacklevel=2
+        # )
+        return (self._dim_size, self.num_source_nodes)
+
     # Cache Interface #########################################################
 
-    @overload
-    def get_sparse_size(self) -> torch.Size:
-        pass
+    def get_dim_size(self) -> int:
+        r"""The dimension size (number of source nodes).
+        Automatically computed and cached when not explicitly set.
+        """
+        if self._dim_size is not None:
+            return self._dim_size
 
-    @overload
-    def get_sparse_size(self, dim: int) -> int:
-        pass
+        dim_size = int(self._data.max()) + 1 if self.numel() > 0 else 0
+        self._dim_size = dim_size
+        return dim_size
 
+    def get_num_source_nodes(self) -> int:
+        r"""The number of source nodes.
+        Automatically computed and cached when not explicitly set.
+        """
+        return self.get_dim_size()
+
+    # For backward compatibility
     def get_sparse_size(
             self,
             dim: Optional[int] = None,
     ) -> Union[torch.Size, int]:
-        r"""The size of the underlying sparse matrix.
-        Automatically computed and cached when not explicitly set.
-        If :obj:`dim` is specified, returns an integer holding the size of that
-        sparse dimension.
-
-        Args:
-            dim (int, optional): The dimension for which to retrieve the size.
-                (default: :obj:`None`)
+        r"""The size of the underlying sparse matrix (deprecated).
+        Use get_dim_size() and num_source_nodes instead.
         """
+        import warnings
+        warnings.warn(
+            "get_sparse_size is deprecated, use get_dim_size and num_source_nodes instead",
+            DeprecationWarning, stacklevel=2)
+
         if dim is not None:
-            size = self._sparse_size[dim]
-            if size is not None:
-                return size
+            if dim == 0:
+                return self.get_dim_size()
+            else:
+                return self.num_source_nodes
 
-            size = int(self._data[dim].max()) + 1 if self.numel() > 0 else 0
-            self._sparse_size = set_tuple_item(self._sparse_size, dim, size)
-            return size
-
-        return torch.Size((self.get_sparse_size(0), self.get_sparse_size(1)))
+        return torch.Size((self.get_dim_size(), self.num_source_nodes))
 
     def get_num_rows(self) -> int:
-        r"""The number of rows of the underlying sparse matrix.
-        Automatically computed and cached when not explicitly set.
-        """
-        return self.get_sparse_size(0)
+        r"""For backward compatibility. Use get_dim_size() instead."""
+        import warnings
+        warnings.warn(
+            "get_num_rows is deprecated, use get_dim_size instead",
+            DeprecationWarning, stacklevel=2)
+        return self.get_dim_size()
 
     def get_num_cols(self) -> int:
-        r"""The number of columns of the underlying sparse matrix.
-        Automatically computed and cached when not explicitly set.
-        """
-        return self.get_sparse_size(1)
+        r"""For backward compatibility. Use num_source_nodes instead."""
+        import warnings
+        warnings.warn(
+            "get_num_cols is deprecated, use num_source_nodes instead",
+            DeprecationWarning, stacklevel=2)
+        return self.num_source_nodes
 
     # Methods #################################################################
 
@@ -368,15 +371,16 @@ class SourceIndex(Tensor):
         raise NotImplementedError("SourceIndex.sort_by not yet implemented")
 
     def get_target_index(self) -> Tensor:
-        # todo: No TargetIndex type yet; maybe not needed?
-        # todo: equivalent to self-edges if present in column 0
-        return torch.arange(self.num_cols, device=self.device, dtype=self.dtype).unsqueeze(-1).expand([-1, self.k])
+        # Create an index tensor representing target nodes
+        return torch.arange(self.num_target_nodes, device=self.device, dtype=self.dtype).unsqueeze(-1).expand(
+            [-1, self.k])
 
     def to_edge_index(self) -> EdgeIndex:
+
         return EdgeIndex(torch.stack([
             self.flatten(),  # todo: maybe sort last dim, for efficiency?
             self.get_target_index().flatten(),
-        ], dim=0), sparse_size=self.sparse_size)
+        ], dim=0), sparse_size=(self.dim_size, self.num_target_nodes) if self.dim_size is not None else None)
 
     def to_sparse_tensor(self) -> SparseTensor:
         r"""Converts the :class:`SourceIndex` to a :class:`SparseTensor`.
@@ -384,29 +388,25 @@ class SourceIndex(Tensor):
         Returns:
             SparseTensor: The resulting sparse tensor.
         """
-        # Flatten the SourceIndex to get the row indices:
-        col_indices = self.flatten()
-
-        # Get the target indices (column indices) for the sparse tensor:
-        row_indices = self.get_target_index().flatten()
 
         # Create the SparseTensor using the row and col indices:
         sparse_tensor = SparseTensor(
-            row=row_indices,
-            col=col_indices,
-            sparse_sizes=(self.sparse_size[1], self.sparse_size[0]),
-            is_sorted=self.is_sorted_by_id,  # Assume sorted by ID if sorted
-            trust_data=True,  # Trust the data since it's validated
+            row=self.get_target_index().flatten(),
+            col=self.flatten(),
+            sparse_sizes=(self.num_source_nodes, self.num_target_nodes),
+            is_sorted=self.is_sorted_by_id,
+            trust_data=True,
         )
 
         return sparse_tensor
+
     # PyTorch/Python builtins #################################################
 
     def __tensor_flatten__(self) -> Tuple[List[str], Tuple[Any, ...]]:
         attrs = ['_data']
 
         ctx = (
-            self._sparse_size,
+            self._dim_size,
             self._sort_order,
             self._cat_metadata,
         )
@@ -422,7 +422,7 @@ class SourceIndex(Tensor):
     ) -> 'SourceIndex':
         edge_index = SourceIndex(
             inner_tensors['_data'],
-            sparse_size=ctx[0],
+            dim_size=ctx[0],
             sort_order=ctx[1],
         )
 
@@ -444,8 +444,8 @@ class SourceIndex(Tensor):
         # `SourceIndex` should be treated as a regular PyTorch tensor for all
         # standard PyTorch functionalities. However,
         # * some of its metadata can be transferred to new functions, e.g.,
-        #   `torch.cat(dim=1)` can inherit the sparse matrix size, or
-        #   `torch.narrow(dim=1)` can inherit cached pointers.
+        #   `torch.cat(dim=1)` can inherit the dimension size, or
+        #   `torch.narrow(dim=1)` can inherit cached information.
         # * not all operations lead to valid `SourceIndex` tensors again, e.g.,
         #   `torch.sum()` does not yield a `SourceIndex` as its output
 
@@ -466,10 +466,8 @@ class SourceIndex(Tensor):
         tensor_str = torch._tensor_str._tensor_str(self._data, indent)
 
         suffixes = []
-        num_rows, num_cols = self.sparse_size
-        if num_rows is not None or num_cols is not None:
-            size_repr = f"({num_rows or '?'}, {num_cols or '?'})"
-            suffixes.append(f'sparse_size={size_repr}')
+        if self._dim_size is not None:
+            suffixes.append(f'dim_size={self._dim_size}')
         if (self.device.type != torch._C._get_default_device()
                 or (self.device.type == 'cuda'
                     and torch.cuda.current_device() != self.device.index)
@@ -495,13 +493,13 @@ class SourceIndex(Tensor):
 
     def _shallow_copy(self) -> 'SourceIndex':
         out = SourceIndex(self._data)
-        out._sparse_size = self._sparse_size
+        out._dim_size = self._dim_size
         out._sort_order = self._sort_order
         out._cat_metadata = self._cat_metadata
         return out
 
     def _clear_metadata(self) -> 'SourceIndex':
-        self._sparse_size = (None, None)
+        self._dim_size = None
         self._sort_order = None
         self._cat_metadata = None
         return self
@@ -530,7 +528,7 @@ def apply_(
         out = tensor
 
     # Copy metadata:
-    out._sparse_size = tensor._sparse_size
+    out._dim_size = tensor._dim_size
     out._sort_order = tensor._sort_order
     out._cat_metadata = tensor._cat_metadata
 
@@ -599,22 +597,20 @@ def _cat(
 
     out = SourceIndex(data)
 
-    sparse_size_list = [t.sparse_size for t in tensors]  # type: ignore
+    dim_size_list = [t.dim_size for t in tensors]  # type: ignore
     sort_order_list = [t._sort_order for t in tensors]  # type: ignore
 
-    total_num_rows: Optional[int] = out.size(0)
-    total_num_cols: Optional[int] = 0
-    for num_cols, _ in sparse_size_list:
-        if num_cols is None:
-            total_num_cols = None
+    # Find the maximum dimension size
+    max_dim_size: Optional[int] = 0
+    for size in dim_size_list:
+        if size is None:
+            max_dim_size = None
             break
-        assert isinstance(total_num_cols, int)
-        total_num_cols = max(num_cols, total_num_cols)
+        max_dim_size = max(size, max_dim_size)
 
-    out._sparse_size = (total_num_cols, total_num_rows)
-
+    out._dim_size = max_dim_size
     out._cat_metadata = CatMetadata(
-        sparse_size=sparse_size_list,
+        dim_size=dim_size_list,
         sort_order=sort_order_list,
     )
 
@@ -631,9 +627,7 @@ def _index_select(
 
     if len(out.shape) == 2:
         # Indexing produces a valid SourceIndex as long as the output is still 2D
-        out = SourceIndex(out)
-        # The N dimension may be reduced by indexing
-        out._sparse_size = (input.sparse_size[0], out.size(0))
+        out = SourceIndex(out, dim_size=input.dim_size)
 
     # todo: taking a row or column should return a (1-d) Index
     return out
@@ -657,8 +651,7 @@ def _slice(
         if step != 1:
             out = out.contiguous()
 
-        out = SourceIndex(out)
-        out._sparse_size = (input.sparse_size[0], out.size(0))
+        out = SourceIndex(out, dim_size=input.dim_size)
         out._sort_order = input._sort_order
 
     return out
@@ -678,8 +671,7 @@ def _index(
     if len(out.shape) != 2:
         return out
 
-    out = SourceIndex(out)
-    out._sparse_size = (input.sparse_size[0], out.size(0))
+    out = SourceIndex(out, dim_size=input.dim_size)
 
     return out
 
@@ -688,15 +680,15 @@ def _index(
 def _select(input: SourceIndex, dim: int, index: int) -> Union[Tensor, Index]:
     out = aten.select.int(input._data, dim, index)
 
-    # Indexing along N or K dimension both produce a valid Index
+    # Indexing along dimensions produces a valid Index
     out = Index(out)
 
     if dim in [0, -2]:
-        out._dim_size = input.num_rows
+        out._dim_size = input.dim_size
         out._is_sorted = input.is_sorted_by_id
     else:
         assert dim in [1, -1]
-        out._dim_size = input.num_cols
+        # When selecting along the K dimension, we can't infer a dim_size
 
     return out
 
@@ -716,7 +708,7 @@ def _add(
         *,
         alpha: int = 1,
 ) -> Union[SourceIndex, Tensor]:
-    sparse_size = input.sparse_size if isinstance(input, SourceIndex) else other.sparse_size
+    dim_size = input.dim_size if isinstance(input, SourceIndex) else other.dim_size
 
     out = aten.add.Tensor(
         input._data if isinstance(input, SourceIndex) else input,
@@ -734,13 +726,13 @@ def _add(
     if isinstance(other, Tensor) and other.numel() <= 1:
         other = int(other)
 
-    total_num_cols: Optional[int] = sparse_size[0]
-    if isinstance(other, int) and sparse_size[0] is not None:
-        total_num_cols = sparse_size[0] + (other * alpha)
+    total_dim_size: Optional[int] = dim_size
+    if isinstance(other, int) and dim_size is not None:
+        total_dim_size = dim_size + (other * alpha)
     elif isinstance(other, SourceIndex):
         raise NotImplementedError('Additions between SourceIndex are not implemented')
 
-    out._sparse_size = (total_num_cols, out.size(0))
+    out._dim_size = total_dim_size
     return out
 
 
@@ -751,7 +743,7 @@ def add_(
         *,
         alpha: int = 1,
 ) -> SourceIndex:
-    sparse_size = input._sparse_size
+    dim_size = input._dim_size
 
     aten.add_.Tensor(
         input._data,
@@ -763,14 +755,11 @@ def add_(
         other = int(other)
 
     if isinstance(other, int):
-        size = maybe_add(sparse_size, other, alpha)
-        assert len(size) == 2
-        input._sparse_size = size
-
+        if dim_size is not None:
+            input._dim_size = dim_size + (other * alpha)
     elif isinstance(other, SourceIndex):
-        size = maybe_add(sparse_size, other._sparse_size, alpha)
-        assert len(size) == 2
-        input._sparse_size = size
+        if dim_size is not None and other.dim_size is not None:
+            input._dim_size = max(dim_size, other.dim_size)
 
     return input
 
@@ -782,7 +771,7 @@ def _sub(
         *,
         alpha: int = 1,
 ) -> Union[SourceIndex, Tensor]:
-    sparse_size = input.sparse_size if isinstance(input, SourceIndex) else other.sparse_size
+    dim_size = input.dim_size if isinstance(input, SourceIndex) else other.dim_size
 
     out = aten.sub.Tensor(
         input._data if isinstance(input, SourceIndex) else input,
@@ -800,13 +789,13 @@ def _sub(
     if isinstance(other, Tensor) and other.numel() <= 1:
         other = int(other)
 
-    total_num_cols: Optional[int] = sparse_size[0]
-    if isinstance(other, int) and sparse_size[0] is not None:
-        total_num_cols = sparse_size[0] - (other * alpha)
+    total_dim_size: Optional[int] = dim_size
+    if isinstance(other, int) and dim_size is not None:
+        total_dim_size = max(0, dim_size - (other * alpha))
     elif isinstance(other, SourceIndex):
-        raise NotImplementedError('Additions between SourceIndex are not implemented')
+        raise NotImplementedError('Subtractions between SourceIndex are not implemented')
 
-    out._sparse_size = (total_num_cols, out.size(0))
+    out._dim_size = total_dim_size
     return out
 
 
@@ -817,7 +806,7 @@ def sub_(
         *,
         alpha: int = 1,
 ) -> SourceIndex:
-    sparse_size = input._sparse_size
+    dim_size = input._dim_size
     sort_order = input._sort_order
     input._clear_metadata()
 
@@ -831,9 +820,8 @@ def sub_(
         other = int(other)
 
     if isinstance(other, int):
-        size = maybe_sub(sparse_size, other, alpha)
-        assert len(size) == 2
-        input._sparse_size = size
+        if dim_size is not None:
+            input._dim_size = max(0, dim_size - (other * alpha))
         input._sort_order = sort_order
 
     return input
