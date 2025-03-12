@@ -68,7 +68,7 @@ def {{collect_name}}(
             raise ValueError("Cannot collect 'adj_t' for edge indices")
 {%- endif %}
             # todo: are these in the right order?
-            edge_index_i = edge_index.get_target_index().flatten()
+            edge_index_i = edge_index.get_target_index()
             edge_index_j = edge_index.flatten()
             ptr = None
 

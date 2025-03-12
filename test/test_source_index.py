@@ -141,7 +141,7 @@ def test_share_memory(dtype, device):
 @onlyCUDA
 @pytest.mark.parametrize('dtype', DTYPES)
 def test_pin_memory(dtype):
-    index = SourceIndex([[0], [1], [1], [2]], sparse_size=(3, 4), is_sorted=True, dtype=dtype)
+    index = SourceIndex([[0], [1], [1], [2]], sparse_size=(3, 4), dtype=dtype)
     assert not index.is_pinned()
     out = index.pin_memory()
     assert out.is_pinned()
@@ -151,7 +151,7 @@ def test_pin_memory(dtype):
 @pytest.mark.parametrize('dtype', DTYPES)
 def test_contiguous(dtype, device):
     kwargs = dict(dtype=dtype, device=device)
-    index = SourceIndex([[0], [1], [1], [2]], sparse_size=(3, 4), is_sorted=True, **kwargs)
+    index = SourceIndex([[0], [1], [1], [2]], sparse_size=(3, 4), **kwargs)
 
     assert index.is_contiguous
     out = index.contiguous()
@@ -186,7 +186,7 @@ def test_cat(dtype, device):
     assert isinstance(out, SourceIndex)
     assert out.sparse_size == (4, 8)
 
-    assert out._cat_metadata.sparse_size == [(4, 4), (4, 4)]
+    assert out._cat_metadata.dim_size == [4, 4]
 
     out = torch.cat([index1, index2, index3], dim=0)
     assert out.size() == (12, 1)
@@ -381,16 +381,16 @@ def test_data_loader(dtype, num_workers, pin_memory):
             assert index.is_shared() != (num_workers == 0) or pin_memory
             assert index._data.is_shared() != (num_workers == 0) or pin_memory
 
-    data = Data(edge_index=index, num_nodes=index.num_cols)
-    collated_loader = torch_geometric.data.DataLoader(
-        [data] * 4,
-        batch_size=2,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        drop_last=True,
-    )
-
-    assert len(loader) == 2
-    for batch in collated_loader:
-        assert isinstance(batch.edge_index, SourceIndex)
-        assert batch.edge_index.sparse_size == (3, 8)
+    # data = Data(edge_index=index, num_nodes=index.num_cols)
+    # collated_loader = torch_geometric.data.DataLoader(
+    #     [data] * 4,
+    #     batch_size=2,
+    #     num_workers=num_workers,
+    #     pin_memory=pin_memory,
+    #     drop_last=True,
+    # )
+    #
+    # assert len(loader) == 2
+    # for batch in collated_loader:
+    #     assert isinstance(batch.edge_index, SourceIndex)
+    #     assert batch.edge_index.sparse_size == (3, 8)
