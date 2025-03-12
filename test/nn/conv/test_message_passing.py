@@ -61,8 +61,8 @@ class MyConv(MessagePassing):
     def message(self, x_j: Tensor, edge_weight: Optional[Tensor]) -> Tensor:
         return x_j if edge_weight is None else edge_weight.view(-1, 1) * x_j
 
-    def message_and_aggregate(self, adj_t: Adj, x: OptPairTensor) -> Tensor:
-        return spmm(adj_t, x[0], reduce=self.aggr)
+    # def message_and_aggregate(self, adj_t: Adj, x: OptPairTensor) -> Tensor:
+    #     return spmm(adj_t, x[0], reduce=self.aggr)
 
 
 class MyConvWithSelfLoops(MessagePassing):
@@ -167,6 +167,17 @@ def test_my_conv_source_index():
 
     out = conv(x, source_index)
     assert out.size() == (4, 32)
+
+
+def test_my_conv_hetero_source_index():
+    x0, x1 = torch.randn(4, 8), torch.randn(3, 8)
+    source_index = torch.tensor([[0, 0, 1], [1, 1, 2], [2, 2, 3]])
+    source_index = SourceIndex(source_index, sparse_size=(4, 3), sort_order='id')
+
+    conv = MyConv(8, 32)
+
+    out = conv((x0, x1), source_index)
+    assert out.size() == (3, 32)
 
 
 class MyCommentedConv(MessagePassing):

@@ -211,7 +211,7 @@ class MessagePassing(torch.nn.Module):
             return [edge_index.num_rows, edge_index.num_cols]
 
         elif isinstance(edge_index, SourceIndex):
-            return [edge_index.num_target_nodes, edge_index.num_source_nodes]  # todo: is this right?
+            return [edge_index.num_source_nodes, edge_index.num_target_nodes]
 
         elif is_sparse(edge_index):
             if self.flow == 'target_to_source':
