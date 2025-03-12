@@ -276,7 +276,7 @@ class SourceIndex(Tensor):
         #     "sparse_size is deprecated, use dim_size and num_source_nodes instead",
         #     DeprecationWarning, stacklevel=2
         # )
-        return (self._dim_size, self.num_source_nodes)
+        return (self.num_source_nodes, self.num_target_nodes)
 
     # Cache Interface #########################################################
 
