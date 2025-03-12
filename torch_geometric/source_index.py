@@ -393,7 +393,7 @@ class SourceIndex(Tensor):
         sparse_tensor = SparseTensor(
             row=self.get_target_index().flatten(),
             col=self.flatten(),
-            sparse_sizes=(self.num_source_nodes, self.num_target_nodes),
+            sparse_sizes=(self.num_target_nodes, self.num_source_nodes),
             is_sorted=self.is_sorted_by_id,
             trust_data=True,
         )
