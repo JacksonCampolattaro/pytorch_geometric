@@ -6,15 +6,11 @@ from typing import (
     Dict,
     Iterable,
     List,
-    Literal,
     NamedTuple,
     Optional,
-    Sequence,
     Tuple,
     Type,
     Union,
-    get_args,
-    overload,
 )
 
 import numpy as np
@@ -23,11 +19,9 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 
 import torch_geometric.typing
-from torch_geometric import Index, is_compiling
-from torch_geometric.index import index2ptr, ptr2index
+from torch_geometric import Index
+from torch_geometric.edge_index import (EdgeIndex)
 from torch_geometric.typing import INDEX_DTYPES, SparseTensor
-
-from torch_geometric.edge_index import (set_tuple_item, EdgeIndex, maybe_add, maybe_sub)
 
 aten = torch.ops.aten
 
@@ -361,7 +355,6 @@ class SourceIndex(Tensor):
             sort_order (str): The sort order, either :obj:`"id"` or
                 :obj:`"dist"`.
         """
-        from torch_geometric.utils import index_sort
 
         sort_order = SortOrder(sort_order)
 
@@ -572,6 +565,25 @@ def _to_copy(
 @implements(aten.alias.default)
 def _alias(tensor: SourceIndex) -> SourceIndex:
     return tensor._shallow_copy()
+
+
+@implements(aten.detach.default)
+def _detach(tensor: SourceIndex):
+    return SourceIndex(
+        tensor._data.detach(),
+        dim_size=tensor._dim_size,
+        sort_order=tensor._sort_order,
+    )
+
+
+@implements(aten.to)
+def _to(tensor: SourceIndex, device):
+    # fixme: does this accomplish anything?
+    return SourceIndex(
+        tensor._data.to(device=device),
+        dim_size=tensor._dim_size,
+        sort_order=tensor._sort_order,
+    )
 
 
 @implements(aten._pin_memory.default)
@@ -825,21 +837,3 @@ def sub_(
         input._sort_order = sort_order
 
     return input
-
-
-@implements(aten.detach.default)
-def detach(self: SourceIndex):
-    return SourceIndex(
-        self._data.detach(),
-        dim_size=self._dim_size,
-        sort_order=self._sort_order,
-    )
-
-
-@implements(aten.alias.default)
-def alias(self: SourceIndex):
-    return SourceIndex(
-        self._data.alias(),
-        dim_size=self._dim_size,
-        sort_order=self._sort_order,
-    )
