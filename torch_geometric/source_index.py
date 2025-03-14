@@ -10,7 +10,7 @@ from typing import (
     Optional,
     Tuple,
     Type,
-    Union,
+    Union, overload,
 )
 
 import numpy as np
@@ -395,6 +395,18 @@ class SourceIndex(Tensor):
 
     # PyTorch/Python builtins #################################################
 
+    def to(self, *args, **kwargs) -> 'SourceIndex':
+        out = self._data.to(*args, **kwargs)
+        if out.dtype not in INDEX_DTYPES:
+            return out
+
+        return SourceIndex(
+            out,
+            dim_size=self._dim_size,
+            sort_order=self._sort_order,
+        )
+
+
     def __tensor_flatten__(self) -> Tuple[List[str], Tuple[Any, ...]]:
         attrs = ['_data']
 
@@ -571,16 +583,6 @@ def _alias(tensor: SourceIndex) -> SourceIndex:
 def _detach(tensor: SourceIndex):
     return SourceIndex(
         tensor._data.detach(),
-        dim_size=tensor._dim_size,
-        sort_order=tensor._sort_order,
-    )
-
-
-@implements(aten.to)
-def _to(tensor: SourceIndex, device):
-    # fixme: does this accomplish anything?
-    return SourceIndex(
-        tensor._data.to(device=device),
         dim_size=tensor._dim_size,
         sort_order=tensor._sort_order,
     )
