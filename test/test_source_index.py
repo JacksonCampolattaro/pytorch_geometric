@@ -82,6 +82,13 @@ def test_to_function(dtype, device):
     assert isinstance(index, SourceIndex)
     assert index.device == device
 
+    out = index.to(device='cpu')
+    assert isinstance(out, SourceIndex)
+    assert out.device == torch.device('cpu')
+
+    out = index.detach()
+    assert isinstance(out, SourceIndex)
+
     out = index.cpu()
     assert isinstance(out, SourceIndex)
     assert out.device == torch.device('cpu')
