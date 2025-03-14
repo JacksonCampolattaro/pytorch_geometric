@@ -825,3 +825,21 @@ def sub_(
         input._sort_order = sort_order
 
     return input
+
+
+@implements(aten.detach.default)
+def detach(self: SourceIndex):
+    return SourceIndex(
+        self._data.detach(),
+        dim_size=self._dim_size,
+        sort_order=self._sort_order,
+    )
+
+
+@implements(aten.alias.default)
+def alias(self: SourceIndex):
+    return SourceIndex(
+        self._data.alias(),
+        dim_size=self._dim_size,
+        sort_order=self._sort_order,
+    )

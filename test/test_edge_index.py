@@ -288,6 +288,9 @@ def test_to_function(dtype, device, is_undirected):
     assert not isinstance(out, EdgeIndex)
     assert out.dtype == torch.float
 
+    out = adj.detach()
+    assert isinstance(out, EdgeIndex)
+
     out = adj.long()
     assert isinstance(out, EdgeIndex)
     assert out.dtype == torch.int64
