@@ -38,6 +38,9 @@ def spmm(
         return src.matmul(other=other, reduce=reduce)  # type: ignore
 
     if isinstance(src, SourceIndex):
+        if src.k == 1:
+            # todo: this is just a gather!
+            return other[src.flatten(), :]
         src = src.to_sparse_tensor()
 
     if isinstance(src, SparseTensor):
