@@ -39,7 +39,7 @@ def spmm(
 
     if isinstance(src, SourceIndex):
         if src.k == 1:
-            # todo: this is just a gather!
+            # Special case: if there's only one edge per node, this is just an indxing operation
             return other[src.flatten(), :]
         src = src.to_sparse_tensor()
 
