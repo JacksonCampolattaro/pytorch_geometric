@@ -204,7 +204,7 @@ class SourceIndex(Tensor):
                              f"source indices")
 
         if self.is_sorted_by_distance and True:
-            # fixme: not implemented, maybe not possible to check?
+            # todo: not implemented, probably not possible to check here
             pass
 
         return self
@@ -406,7 +406,6 @@ class SourceIndex(Tensor):
             sort_order=self._sort_order,
         )
 
-
     def __tensor_flatten__(self) -> Tuple[List[str], Tuple[Any, ...]]:
         attrs = ['_data']
 
@@ -593,6 +592,57 @@ def _pin_memory(tensor: SourceIndex) -> SourceIndex:
     out = apply_(tensor, aten._pin_memory.default)
     assert isinstance(out, SourceIndex)
     return out
+
+
+@implements(aten.sort.default)
+def _sort(
+        tensor: SourceIndex,
+        dim: int = -1,
+        descending: bool = False,
+) -> Tuple[SourceIndex, Tensor]:
+    assert dim == -1
+    if tensor.is_sorted_by_id and not descending:
+        return tensor, torch.arange(
+            tensor.k,
+            device=tensor._data.device
+        ).repeat(tensor._data.shape[0], 1)
+
+    data, perm = aten.sort.default(tensor._data, dim, descending)
+
+    out = SourceIndex(data)
+    out._dim_size = tensor._dim_size
+
+    if not descending:
+        out._sort_order = SortOrder.ID
+
+    return out, perm
+
+
+@implements(aten.sort.stable)
+def _sort_stable(
+        tensor: SourceIndex,
+        *,
+        stable: bool = False,
+        dim: int = -1,
+        descending: bool = False,
+) -> Tuple[SourceIndex, Tensor]:
+    assert dim == -1
+    if tensor.is_sorted_by_id and not descending:
+        return tensor, torch.arange(
+            tensor._data.shape[1],
+            device=tensor._data.device
+        ).repeat(tensor._data.shape[0], 1)
+
+    data, perm = aten.sort.stable(tensor._data, stable=stable, dim=dim,
+                                  descending=descending)
+
+    out = SourceIndex(data)
+    out._dim_size = tensor._dim_size
+
+    if not descending:
+        out._sort_order = SortOrder.ID
+
+    return out, perm
 
 
 @implements(aten.cat.default)
@@ -787,18 +837,21 @@ def _sub(
 ) -> Union[SourceIndex, Tensor]:
     dim_size = input.dim_size if isinstance(input, SourceIndex) else other.dim_size
 
-    out = aten.sub.Tensor(
+    data = aten.sub.Tensor(
         input._data if isinstance(input, SourceIndex) else input,
         other._data if isinstance(other, SourceIndex) else other,
         alpha=alpha,
     )
 
-    if out.dtype not in INDEX_DTYPES:
-        return out
-    if out.shape != input.shape:
-        return out
+    if data.dtype not in INDEX_DTYPES:
+        return data
+    if data.shape != input.shape:
+        return data
 
-    out = SourceIndex(out)
+    out = SourceIndex(data)
+
+    if not isinstance(input, SourceIndex):
+        return out
 
     if isinstance(other, Tensor) and other.numel() <= 1:
         other = int(other)
@@ -806,8 +859,9 @@ def _sub(
     total_dim_size: Optional[int] = dim_size
     if isinstance(other, int) and dim_size is not None:
         total_dim_size = max(0, dim_size - (other * alpha))
+        out._sort_order = input._sort_order
     elif isinstance(other, SourceIndex):
-        raise NotImplementedError('Subtractions between SourceIndex are not implemented')
+        raise NotImplementedError('Subtractions between SourceIndex are not supported')
 
     out._dim_size = total_dim_size
     return out

@@ -46,11 +46,37 @@ def test_basic(dtype, device):
 @withCUDA
 @pytest.mark.parametrize('dtype', DTYPES)
 def test_identity(dtype, device):
-    raise NotImplementedError("This test of SourceIndex has not yet been implemented")
+    kwargs = dict(dtype=dtype, device=device, dim_size=3)
+    index = SourceIndex([[0], [1], [1], [2]], **kwargs)
+
+    out = SourceIndex(index)
+    assert not isinstance(out.as_tensor(), SourceIndex)
+    assert out.data_ptr() == index.data_ptr()
+    assert out.dtype == index.dtype
+    assert out.device == index.device
+    assert out.dim_size == index.dim_size
+    assert out.is_sorted == index.is_sorted
+
+    out = SourceIndex(index, dim_size=4)
+    assert out.dim_size == 4
+    assert out.is_sorted == index.is_sorted
 
 
 def test_validate():
-    raise NotImplementedError("This test of SourceIndex has not yet been implemented")
+    with pytest.raises(ValueError, match="unsupported data type"):
+        SourceIndex([[0.0], [1.0]])
+    with pytest.raises(ValueError, match="needs to be two-dimensional"):
+        SourceIndex([0, 1])
+    with pytest.raises(TypeError, match="invalid combination of arguments"):
+        SourceIndex(tensor([[0], [1]]), torch.long)
+    with pytest.raises(TypeError, match="invalid keyword arguments"):
+        SourceIndex(tensor([[0], [1]]), dtype=torch.long)
+    with pytest.raises(ValueError, match="contains negative indices"):
+        SourceIndex([[-1], [0]]).validate()
+    with pytest.raises(ValueError, match="than its dimension size"):
+        SourceIndex([[0], [10]], dim_size=2).validate()
+    with pytest.raises(ValueError, match="not sorted"):
+        SourceIndex([[1, 2], [1, 0]], sort_order='id').validate()
 
 
 @withCUDA
@@ -169,13 +195,53 @@ def test_contiguous(dtype, device):
 @withCUDA
 @pytest.mark.parametrize('dtype', DTYPES)
 def test_sort(dtype, device):
-    raise NotImplementedError("This test of SourceIndex has not yet been implemented")
+    kwargs = dict(dtype=dtype, device=device)
+    index = SourceIndex([[1, 0], [2, 1]], dim_size=3, **kwargs)
+
+    index, _ = index.sort()
+    assert isinstance(index, SourceIndex)
+    assert index.equal(tensor([[0, 1], [1, 2]], device=device))
+    assert index.dim_size == 3
+    assert index.is_sorted
+
+    out, perm = index.sort()
+    assert isinstance(out, SourceIndex)
+    assert out._data.data_ptr() == index._data.data_ptr()
+    assert perm.equal(tensor([[0, 1], [0, 1]], device=device))
+    assert out.dim_size == 3
+
+    index, _ = index.sort(descending=True)
+    assert isinstance(index, SourceIndex)
+    assert index.equal(tensor([[1, 0], [2, 1]], device=device))
+    assert index.dim_size == 3
+    assert not index.is_sorted
 
 
 @withCUDA
 @pytest.mark.parametrize('dtype', DTYPES)
 def test_sort_stable(dtype, device):
-    raise NotImplementedError("This test of SourceIndex has not yet been implemented")
+    # fixme: this might not actually test stability!
+    kwargs = dict(dtype=dtype, device=device)
+    index = SourceIndex([[1, 0, 1], [2, 1, 1]], dim_size=3, **kwargs)
+
+    index, _ = index.sort(stable=True)
+    assert isinstance(index, SourceIndex)
+    assert index.equal(tensor([[0, 1, 1], [1, 1, 2]], device=device))
+    assert index.dim_size == 3
+    assert index.is_sorted
+
+    out, perm = index.sort(stable=True)
+    assert isinstance(out, SourceIndex)
+    assert out._data.data_ptr() == index._data.data_ptr()
+    assert perm.equal(tensor([[0, 1, 2], [0, 1, 2]], device=device))
+    assert out.dim_size == 3
+
+    index, perm = index.sort(stable=True, descending=True)
+    assert isinstance(index, SourceIndex)
+    assert index.equal(tensor([[1, 1, 0], [2, 1, 1]], device=device))
+    assert perm.equal(tensor([[1, 2, 0], [2, 0, 1]], device=device))
+    assert index.dim_size == 3
+    assert not index.is_sorted
 
 
 @withCUDA
@@ -324,7 +390,32 @@ def test_add(dtype, device):
 @withCUDA
 @pytest.mark.parametrize('dtype', DTYPES)
 def test_sub(dtype, device):
-    raise NotImplementedError("This test of SourceIndex has not yet been implemented")
+    kwargs = dict(dtype=dtype, device=device)
+    index = SourceIndex([[4, 5], [5, 6]], dim_size=7, sort_order='id', **kwargs)
+
+    out = torch.sub(index, 2, alpha=2)
+    assert isinstance(out, SourceIndex)
+    assert out.equal(tensor([[0, 1], [1, 2]], device=device))
+    assert out.dim_size == 3
+    assert out.is_sorted_by_id
+
+    out = index - tensor([2], dtype=dtype, device=device)
+    assert isinstance(out, SourceIndex)
+    assert out.equal(tensor([[2, 3], [3, 4]], device=device))
+    assert out.dim_size == 5
+    assert out.is_sorted_by_id
+
+    with pytest.raises(RuntimeError, match="not supported"):
+        _ = index.sub(index)
+
+    index -= 2
+    assert isinstance(index, SourceIndex)
+    assert index.equal(tensor([[2, 3], [3, 4]], device=device))
+    assert index.dim_size == 5
+    assert out.is_sorted_by_id
+
+    with pytest.raises(RuntimeError, match="can't be cast"):
+        index -= 2.5
 
 
 def test_to_list():
