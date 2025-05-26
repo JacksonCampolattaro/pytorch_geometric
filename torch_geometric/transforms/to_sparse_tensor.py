@@ -106,6 +106,8 @@ class ToSparseTensor(BaseTransform):
 
             if isinstance(store.edge_index, SourceIndex):
                 # fixme: add support for other layouts; edge attributes
+                if store.edge_index.k == 1:
+                    continue
                 sparse_tensor = store.edge_index.to_sparse_tensor()
             else:
                 # Handle regular edge_index
