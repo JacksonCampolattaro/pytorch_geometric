@@ -7,11 +7,11 @@ import torch
 from torch import tensor
 
 import torch_geometric.typing
-from torch_geometric import SourceIndex, Index
+from torch_geometric import SourceIndex, Index, EdgeIndex
 from torch_geometric.data import Data
 from torch_geometric.io import fs
-from torch_geometric.testing import onlyCUDA, withCUDA
-from torch_geometric.typing import INDEX_DTYPES
+from torch_geometric.testing import onlyCUDA, withCUDA, withPackage
+from torch_geometric.typing import INDEX_DTYPES, SparseTensor
 
 DTYPES = [pytest.param(dtype, id=str(dtype)[6:]) for dtype in INDEX_DTYPES]
 
@@ -422,6 +422,20 @@ def test_to_list():
     data = torch.tensor([[0, 1], [1, 1], [1, 2], [2, 2]])
     index = SourceIndex(data)
     assert index.tolist() == data.tolist()
+
+
+@withCUDA
+# @withPackage('torch_sparse')
+def test_to_sparse_tensor(device):
+    kwargs = dict(device=device)
+    adj_ref = EdgeIndex([[0, 1, 1, 2, 0, 2], [1, 0, 2, 1, 2, 0]], **kwargs)
+    adj = SourceIndex([[1, 2], [0, 2], [1, 0]])
+    out = adj.to_sparse_tensor()
+    assert isinstance(out, SparseTensor)
+    assert out.sizes() == [3, 3]
+    row, col, _ = out.coo()
+    assert row.equal(adj_ref[0])
+    assert col.equal(adj_ref[1])
 
 
 def test_numpy():
