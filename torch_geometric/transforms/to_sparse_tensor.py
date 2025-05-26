@@ -58,13 +58,14 @@ class ToSparseTensor(BaseTransform):
             :obj:`remove_edge_index` to :obj:`True`.
             (default: :obj:`False`)
     """
+
     def __init__(
-        self,
-        attr: Optional[str] = 'edge_weight',
-        remove_edge_index: bool = True,
-        fill_cache: bool = True,
-        layout: Optional[int] = None,
-        replace_edge_index: bool = False,
+            self,
+            attr: Optional[str] = 'edge_weight',
+            remove_edge_index: bool = True,
+            fill_cache: bool = True,
+            layout: Optional[int] = None,
+            replace_edge_index: bool = False,
     ) -> None:
         if layout not in {None, torch.sparse_coo, torch.sparse_csr}:
             raise ValueError(f"Unexpected sparse tensor layout "
@@ -84,9 +85,8 @@ class ToSparseTensor(BaseTransform):
         for store in data.edge_stores:
             # Check for either edge_index or source_index attributes
             has_edge_index = 'edge_index' in store
-            has_source_index = 'source_index' in store
 
-            if not (has_edge_index or has_source_index):
+            if not has_edge_index:
                 continue
 
             keys, values = [], []
@@ -104,29 +104,12 @@ class ToSparseTensor(BaseTransform):
             if self.attr is not None and self.attr in store:
                 edge_weight = store[self.attr]
 
-            if has_edge_index:
-                # Check if edge_index is a SourceIndex instance
-                if isinstance(store.edge_index, SourceIndex):
-                    # Convert SourceIndex to EdgeIndex
-                    edge_index = store.edge_index.to_edge_index().as_tensor()
-                else:
-                    # Handle regular edge_index
-                    edge_index = store.edge_index
-
-                    # Sort the edge_index and associated values
-                    edge_index, values = sort_edge_index(
-                        edge_index,
-                        values,
-                        sort_by_row=False,
-                    )
-
-                    for key, value in zip(keys, values):
-                        store[key] = value
-
-            elif has_source_index:
-                # Convert SourceIndex to EdgeIndex for processing
-                source_index = store.source_index
-                edge_index = source_index.to_edge_index()
+            if isinstance(store.edge_index, SourceIndex):
+                # fixme: add support for other layouts; edge attributes
+                sparse_tensor = store.edge_index.to_sparse_tensor()
+            else:
+                # Handle regular edge_index
+                edge_index = store.edge_index
 
                 # Sort the edge_index and associated values
                 edge_index, values = sort_edge_index(
@@ -138,46 +121,42 @@ class ToSparseTensor(BaseTransform):
                 for key, value in zip(keys, values):
                     store[key] = value
 
-            # Create sparse tensor based on layout preference
-            layout = self.layout
-            sparse_tensor = None
+                # Create sparse tensor based on layout preference
+                layout = self.layout
+                sparse_tensor = None
 
-            if layout is None and torch_geometric.typing.WITH_TORCH_SPARSE:
-                sparse_tensor = SparseTensor(
-                    row=edge_index[1],
-                    col=edge_index[0],
-                    value=edge_weight,
-                    sparse_sizes=size,
-                    is_sorted=True,
-                    trust_data=True,
-                )
+                if layout is None and torch_geometric.typing.WITH_TORCH_SPARSE:
+                    sparse_tensor = SparseTensor(
+                        row=edge_index[1],
+                        col=edge_index[0],
+                        value=edge_weight,
+                        sparse_sizes=size,
+                        is_sorted=True,
+                        trust_data=True,
+                    )
 
-            # TODO Multi-dimensional edge attributes only supported for COO.
-            elif ((edge_weight is not None and edge_weight.dim() > 1)
-                  or layout == torch.sparse_coo):
-                assert size[0] is not None and size[1] is not None
-                sparse_tensor = to_torch_coo_tensor(
-                    edge_index.flip([0]),
-                    edge_attr=edge_weight,
-                    size=size,
-                )
+                # TODO Multi-dimensional edge attributes only supported for COO.
+                elif ((edge_weight is not None and edge_weight.dim() > 1)
+                      or layout == torch.sparse_coo):
+                    assert size[0] is not None and size[1] is not None
+                    sparse_tensor = to_torch_coo_tensor(
+                        edge_index.flip([0]),
+                        edge_attr=edge_weight,
+                        size=size,
+                    )
 
-            elif layout is None or layout == torch.sparse_csr:
-                assert size[0] is not None and size[1] is not None
-                sparse_tensor = to_torch_csr_tensor(
-                    edge_index.flip([0]),
-                    edge_attr=edge_weight,
-                    size=size,
-                )
+                elif layout is None or layout == torch.sparse_csr:
+                    assert size[0] is not None and size[1] is not None
+                    sparse_tensor = to_torch_csr_tensor(
+                        edge_index.flip([0]),
+                        edge_attr=edge_weight,
+                        size=size,
+                    )
 
             # Decide where to store the result
             if self.replace_edge_index:
                 # Store back to edge_index and ensure it's removed from other places
                 store['edge_index'] = sparse_tensor
-
-                # If source_index exists, remove it
-                if has_source_index:
-                    del store['source_index']
 
                 # Remove adj_t if it exists
                 if 'adj_t' in store:
@@ -190,8 +169,6 @@ class ToSparseTensor(BaseTransform):
                 if self.remove_edge_index:
                     if has_edge_index:
                         del store['edge_index']
-                    if has_source_index:
-                        del store['source_index']
 
                     if self.attr is not None and self.attr in store:
                         del store[self.attr]
