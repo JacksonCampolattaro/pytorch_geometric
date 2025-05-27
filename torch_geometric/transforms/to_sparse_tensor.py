@@ -105,55 +105,52 @@ class ToSparseTensor(BaseTransform):
                 edge_weight = store[self.attr]
 
             if isinstance(store.edge_index, SourceIndex):
-                # fixme: add support for other layouts; edge attributes
-                if store.edge_index.k == 1:
-                    continue
-                sparse_tensor = store.edge_index.to_sparse_tensor()
-            else:
-                # Handle regular edge_index
-                edge_index = store.edge_index
+                store.edge_index = store.edge_index.to_edge_index().as_tensor()
 
-                # Sort the edge_index and associated values
-                edge_index, values = sort_edge_index(
-                    edge_index,
-                    values,
-                    sort_by_row=False,
+            # Handle regular edge_index
+            edge_index = store.edge_index
+
+            # Sort the edge_index and associated values
+            edge_index, values = sort_edge_index(
+                edge_index,
+                values,
+                sort_by_row=False,
+            )
+
+            for key, value in zip(keys, values):
+                store[key] = value
+
+            # Create sparse tensor based on layout preference
+            layout = self.layout
+            sparse_tensor = None
+
+            if layout is None and torch_geometric.typing.WITH_TORCH_SPARSE:
+                sparse_tensor = SparseTensor(
+                    row=edge_index[1],
+                    col=edge_index[0],
+                    value=edge_weight,
+                    sparse_sizes=size,
+                    is_sorted=True,
+                    trust_data=True,
                 )
 
-                for key, value in zip(keys, values):
-                    store[key] = value
+            # TODO Multi-dimensional edge attributes only supported for COO.
+            elif ((edge_weight is not None and edge_weight.dim() > 1)
+                  or layout == torch.sparse_coo):
+                assert size[0] is not None and size[1] is not None
+                sparse_tensor = to_torch_coo_tensor(
+                    edge_index.flip([0]),
+                    edge_attr=edge_weight,
+                    size=size,
+                )
 
-                # Create sparse tensor based on layout preference
-                layout = self.layout
-                sparse_tensor = None
-
-                if layout is None and torch_geometric.typing.WITH_TORCH_SPARSE:
-                    sparse_tensor = SparseTensor(
-                        row=edge_index[1],
-                        col=edge_index[0],
-                        value=edge_weight,
-                        sparse_sizes=size,
-                        is_sorted=True,
-                        trust_data=True,
-                    )
-
-                # TODO Multi-dimensional edge attributes only supported for COO.
-                elif ((edge_weight is not None and edge_weight.dim() > 1)
-                      or layout == torch.sparse_coo):
-                    assert size[0] is not None and size[1] is not None
-                    sparse_tensor = to_torch_coo_tensor(
-                        edge_index.flip([0]),
-                        edge_attr=edge_weight,
-                        size=size,
-                    )
-
-                elif layout is None or layout == torch.sparse_csr:
-                    assert size[0] is not None and size[1] is not None
-                    sparse_tensor = to_torch_csr_tensor(
-                        edge_index.flip([0]),
-                        edge_attr=edge_weight,
-                        size=size,
-                    )
+            elif layout is None or layout == torch.sparse_csr:
+                assert size[0] is not None and size[1] is not None
+                sparse_tensor = to_torch_csr_tensor(
+                    edge_index.flip([0]),
+                    edge_attr=edge_weight,
+                    size=size,
+                )
 
             # Decide where to store the result
             if self.replace_edge_index:
