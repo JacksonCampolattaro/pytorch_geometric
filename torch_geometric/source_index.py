@@ -142,7 +142,7 @@ class SourceIndex(Tensor):
             raise NotImplementedError("Cannot automatically convert torch.sparse to SourceIndex")
         if data.layout == torch.sparse_csr:
             raise NotImplementedError("Cannot automatically convert torch.sparse to SourceIndex")
-        if (torch_geometric.typing.WITH_PT112 and data.layout == torch.sparse_csc):
+        if data.layout == torch.sparse_csc:
             raise NotImplementedError("Cannot automatically convert torch.sparse to SourceIndex")
 
         assert_valid_dtype(data)
