@@ -211,7 +211,7 @@ class MessagePassing(torch.nn.Module):
             return [edge_index.num_rows, edge_index.num_cols]
 
         elif isinstance(edge_index, SourceIndex):
-            return [edge_index.num_rows, edge_index.num_cols]  # todo: is this right?
+            return [edge_index.num_source_nodes, edge_index.num_target_nodes]
 
         elif is_sparse(edge_index):
             if self.flow == 'target_to_source':
@@ -280,7 +280,7 @@ class MessagePassing(torch.nn.Module):
                     f"{index.min().item()}). Please ensure that all "
                     f"indices in 'edge_index' point to valid indices "
                     f"in the interval [0, {src.size(self.node_dim)}) in "
-                    f"your node feature matrix and try again.")
+                    f"your node feature matrix and try again.") from e
 
             if (index.numel() > 0 and index.max() >= src.size(self.node_dim)):
                 raise IndexError(
@@ -289,7 +289,7 @@ class MessagePassing(torch.nn.Module):
                     f"{index.max().item()}). Please ensure that all "
                     f"indices in 'edge_index' point to valid indices "
                     f"in the interval [0, {src.size(self.node_dim)}) in "
-                    f"your node feature matrix and try again.")
+                    f"your node feature matrix and try again.") from e
 
             raise e
 
@@ -390,9 +390,9 @@ class MessagePassing(torch.nn.Module):
             assert self.flow == 'source_to_target'
             out['adj_t'] = None
             out['edge_index'] = None
-            out['edge_index_i'] = edge_index.get_target_index()
+            out['edge_index_i'] = edge_index.get_target_index().flatten()
             out['edge_index_j'] = edge_index.flatten()
-            out['ptr'] = None
+            out['ptr'] = None  # todo: maybe this can help performance?
 
         elif isinstance(edge_index, Tensor):
             out['adj_t'] = None
@@ -486,7 +486,7 @@ class MessagePassing(torch.nn.Module):
         # Run "fused" message and aggregation (if applicable).
         fuse = False
         if self.fuse and not self.explain:
-            if is_sparse(edge_index):
+            if is_sparse(edge_index) or isinstance(edge_index, SourceIndex):
                 fuse = True
             elif (not torch.jit.is_scripting()
                   and isinstance(edge_index, EdgeIndex)):

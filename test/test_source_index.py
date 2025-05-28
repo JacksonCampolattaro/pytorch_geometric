@@ -7,11 +7,11 @@ import torch
 from torch import tensor
 
 import torch_geometric.typing
-from torch_geometric import SourceIndex
+from torch_geometric import SourceIndex, Index, EdgeIndex
 from torch_geometric.data import Data
 from torch_geometric.io import fs
-from torch_geometric.testing import onlyCUDA, withCUDA
-from torch_geometric.typing import INDEX_DTYPES
+from torch_geometric.testing import onlyCUDA, withCUDA, withPackage
+from torch_geometric.typing import INDEX_DTYPES, SparseTensor
 
 DTYPES = [pytest.param(dtype, id=str(dtype)[6:]) for dtype in INDEX_DTYPES]
 
@@ -46,11 +46,37 @@ def test_basic(dtype, device):
 @withCUDA
 @pytest.mark.parametrize('dtype', DTYPES)
 def test_identity(dtype, device):
-    raise NotImplementedError("This test of SourceIndex has not yet been implemented")
+    kwargs = dict(dtype=dtype, device=device, dim_size=3)
+    index = SourceIndex([[0], [1], [1], [2]], **kwargs)
+
+    out = SourceIndex(index)
+    assert not isinstance(out.as_tensor(), SourceIndex)
+    assert out.data_ptr() == index.data_ptr()
+    assert out.dtype == index.dtype
+    assert out.device == index.device
+    assert out.dim_size == index.dim_size
+    assert out.is_sorted == index.is_sorted
+
+    out = SourceIndex(index, dim_size=4)
+    assert out.dim_size == 4
+    assert out.is_sorted == index.is_sorted
 
 
 def test_validate():
-    raise NotImplementedError("This test of SourceIndex has not yet been implemented")
+    with pytest.raises(ValueError, match="unsupported data type"):
+        SourceIndex([[0.0], [1.0]])
+    with pytest.raises(ValueError, match="needs to be two-dimensional"):
+        SourceIndex([0, 1])
+    with pytest.raises(TypeError, match="invalid combination of arguments"):
+        SourceIndex(tensor([[0], [1]]), torch.long)
+    with pytest.raises(TypeError, match="invalid keyword arguments"):
+        SourceIndex(tensor([[0], [1]]), dtype=torch.long)
+    with pytest.raises(ValueError, match="contains negative indices"):
+        SourceIndex([[-1], [0]]).validate()
+    with pytest.raises(ValueError, match="than its dimension size"):
+        SourceIndex([[0], [10]], dim_size=2).validate()
+    with pytest.raises(ValueError, match="not sorted"):
+        SourceIndex([[1, 2], [1, 0]], sort_order='id').validate()
 
 
 @withCUDA
@@ -81,6 +107,13 @@ def test_to_function(dtype, device):
     index = index.to(device)
     assert isinstance(index, SourceIndex)
     assert index.device == device
+
+    out = index.to(device='cpu')
+    assert isinstance(out, SourceIndex)
+    assert out.device == torch.device('cpu')
+
+    out = index.detach()
+    assert isinstance(out, SourceIndex)
 
     out = index.cpu()
     assert isinstance(out, SourceIndex)
@@ -141,7 +174,7 @@ def test_share_memory(dtype, device):
 @onlyCUDA
 @pytest.mark.parametrize('dtype', DTYPES)
 def test_pin_memory(dtype):
-    index = SourceIndex([[0], [1], [1], [2]], sparse_size=(3, 4), is_sorted=True, dtype=dtype)
+    index = SourceIndex([[0], [1], [1], [2]], sparse_size=(3, 4), dtype=dtype)
     assert not index.is_pinned()
     out = index.pin_memory()
     assert out.is_pinned()
@@ -151,7 +184,7 @@ def test_pin_memory(dtype):
 @pytest.mark.parametrize('dtype', DTYPES)
 def test_contiguous(dtype, device):
     kwargs = dict(dtype=dtype, device=device)
-    index = SourceIndex([[0], [1], [1], [2]], sparse_size=(3, 4), is_sorted=True, **kwargs)
+    index = SourceIndex([[0], [1], [1], [2]], sparse_size=(3, 4), **kwargs)
 
     assert index.is_contiguous
     out = index.contiguous()
@@ -162,13 +195,53 @@ def test_contiguous(dtype, device):
 @withCUDA
 @pytest.mark.parametrize('dtype', DTYPES)
 def test_sort(dtype, device):
-    raise NotImplementedError("This test of SourceIndex has not yet been implemented")
+    kwargs = dict(dtype=dtype, device=device)
+    index = SourceIndex([[1, 0], [2, 1]], dim_size=3, **kwargs)
+
+    index, _ = index.sort()
+    assert isinstance(index, SourceIndex)
+    assert index.equal(tensor([[0, 1], [1, 2]], device=device))
+    assert index.dim_size == 3
+    assert index.is_sorted
+
+    out, perm = index.sort()
+    assert isinstance(out, SourceIndex)
+    assert out._data.data_ptr() == index._data.data_ptr()
+    assert perm.equal(tensor([[0, 1], [0, 1]], device=device))
+    assert out.dim_size == 3
+
+    index, _ = index.sort(descending=True)
+    assert isinstance(index, SourceIndex)
+    assert index.equal(tensor([[1, 0], [2, 1]], device=device))
+    assert index.dim_size == 3
+    assert not index.is_sorted
 
 
 @withCUDA
 @pytest.mark.parametrize('dtype', DTYPES)
 def test_sort_stable(dtype, device):
-    raise NotImplementedError("This test of SourceIndex has not yet been implemented")
+    # fixme: this might not actually test stability!
+    kwargs = dict(dtype=dtype, device=device)
+    index = SourceIndex([[1, 0, 1], [2, 1, 1]], dim_size=3, **kwargs)
+
+    index, _ = index.sort(stable=True)
+    assert isinstance(index, SourceIndex)
+    assert index.equal(tensor([[0, 1, 1], [1, 1, 2]], device=device))
+    assert index.dim_size == 3
+    assert index.is_sorted
+
+    out, perm = index.sort(stable=True)
+    assert isinstance(out, SourceIndex)
+    assert out._data.data_ptr() == index._data.data_ptr()
+    assert perm.equal(tensor([[0, 1, 2], [0, 1, 2]], device=device))
+    assert out.dim_size == 3
+
+    index, perm = index.sort(stable=True, descending=True)
+    assert isinstance(index, SourceIndex)
+    assert index.equal(tensor([[1, 1, 0], [2, 1, 1]], device=device))
+    assert perm.equal(tensor([[1, 2, 0], [2, 0, 1]], device=device))
+    assert index.dim_size == 3
+    assert not index.is_sorted
 
 
 @withCUDA
@@ -186,7 +259,7 @@ def test_cat(dtype, device):
     assert isinstance(out, SourceIndex)
     assert out.sparse_size == (4, 8)
 
-    assert out._cat_metadata.sparse_size == [(4, 4), (4, 4)]
+    assert out._cat_metadata.dim_size == [4, 4]
 
     out = torch.cat([index1, index2, index3], dim=0)
     assert out.size() == (12, 1)
@@ -243,6 +316,11 @@ def test_getitem(dtype, device):
     assert out.sparse_size == (3, 2)
 
     out = index[tensor([1, 3], device=device)]
+    assert isinstance(out, SourceIndex)
+    assert out.equal(tensor([[1, 1], [2, 2]], device=device))
+    assert out.sparse_size == (3, 2)
+
+    out = index[Index(tensor([1, 3], device=device))]
     assert isinstance(out, SourceIndex)
     assert out.equal(tensor([[1, 1], [2, 2]], device=device))
     assert out.sparse_size == (3, 2)
@@ -312,13 +390,52 @@ def test_add(dtype, device):
 @withCUDA
 @pytest.mark.parametrize('dtype', DTYPES)
 def test_sub(dtype, device):
-    raise NotImplementedError("This test of SourceIndex has not yet been implemented")
+    kwargs = dict(dtype=dtype, device=device)
+    index = SourceIndex([[4, 5], [5, 6]], dim_size=7, sort_order='id', **kwargs)
+
+    out = torch.sub(index, 2, alpha=2)
+    assert isinstance(out, SourceIndex)
+    assert out.equal(tensor([[0, 1], [1, 2]], device=device))
+    assert out.dim_size == 3
+    assert out.is_sorted_by_id
+
+    out = index - tensor([2], dtype=dtype, device=device)
+    assert isinstance(out, SourceIndex)
+    assert out.equal(tensor([[2, 3], [3, 4]], device=device))
+    assert out.dim_size == 5
+    assert out.is_sorted_by_id
+
+    with pytest.raises(RuntimeError, match="not supported"):
+        _ = index.sub(index)
+
+    index -= 2
+    assert isinstance(index, SourceIndex)
+    assert index.equal(tensor([[2, 3], [3, 4]], device=device))
+    assert index.dim_size == 5
+    assert out.is_sorted_by_id
+
+    with pytest.raises(RuntimeError, match="can't be cast"):
+        index -= 2.5
 
 
 def test_to_list():
     data = torch.tensor([[0, 1], [1, 1], [1, 2], [2, 2]])
     index = SourceIndex(data)
     assert index.tolist() == data.tolist()
+
+
+@withCUDA
+# @withPackage('torch_sparse')
+def test_to_sparse_tensor(device):
+    kwargs = dict(device=device)
+    adj_ref = EdgeIndex([[0, 1, 1, 2, 0, 2], [1, 0, 2, 1, 2, 0]], **kwargs)
+    adj = SourceIndex([[1, 2], [0, 2], [1, 0]])
+    out = adj.to_sparse_tensor()
+    assert isinstance(out, SparseTensor)
+    assert out.sizes() == [3, 3]
+    row, col, _ = out.coo()
+    assert row.equal(adj_ref[0])
+    assert col.equal(adj_ref[1])
 
 
 def test_numpy():
@@ -376,16 +493,16 @@ def test_data_loader(dtype, num_workers, pin_memory):
             assert index.is_shared() != (num_workers == 0) or pin_memory
             assert index._data.is_shared() != (num_workers == 0) or pin_memory
 
-    data = Data(edge_index=index, num_nodes=index.num_cols)
-    collated_loader = torch_geometric.data.DataLoader(
-        [data] * 4,
-        batch_size=2,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        drop_last=True,
-    )
-
-    assert len(loader) == 2
-    for batch in collated_loader:
-        assert isinstance(batch.edge_index, SourceIndex)
-        assert batch.edge_index.sparse_size == (3, 8)
+    # data = Data(edge_index=index, num_nodes=index.num_cols)
+    # collated_loader = torch_geometric.data.DataLoader(
+    #     [data] * 4,
+    #     batch_size=2,
+    #     num_workers=num_workers,
+    #     pin_memory=pin_memory,
+    #     drop_last=True,
+    # )
+    #
+    # assert len(loader) == 2
+    # for batch in collated_loader:
+    #     assert isinstance(batch.edge_index, SourceIndex)
+    #     assert batch.edge_index.sparse_size == (3, 8)

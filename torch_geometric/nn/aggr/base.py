@@ -137,7 +137,7 @@ class Aggregation(torch.nn.Module):
                 if index.numel() > 0 and dim_size <= int(index.max()):
                     raise ValueError(f"Encountered invalid 'dim_size' (got "
                                      f"'{dim_size}' but expected "
-                                     f">= '{int(index.max()) + 1}')")
+                                     f">= '{int(index.max()) + 1}')") from e
             raise e
 
     def __repr__(self) -> str:
@@ -177,6 +177,9 @@ class Aggregation(torch.nn.Module):
                dim: int = -2, reduce: str = 'sum') -> Tensor:
 
         if isinstance(index, SourceIndex):
+            if index.k == 1:
+                return x
+
             x = x.reshape(-1, index.k, x.shape[-1])
             if reduce == 'sum':
                 return x.sum(dim=1)
